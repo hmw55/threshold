@@ -1,6 +1,6 @@
 # Technical Decision Log
 
-This document records significant technical and architectural decisions made during Threshold development, including the reasoning behind them. 
+This document records significant technical and architectural decisions made during Threshold development, including the reasoning behind them.
 
 ---
 
@@ -25,7 +25,7 @@ Local development, builds, linting, type checking, and testing should be perform
 
 **Status:** Accepted
 
-Threshold uses a pnpm workspace organized as a monorepo. 
+Threshold uses a pnpm workspace organized as a monorepo.
 
 Primary workspace areas are:
 
@@ -42,31 +42,55 @@ A monorepo allows these components to evolve together while maintaining clear bo
 
 ---
 
-## TD-003 — Fire TV Client Technology
+## TD-003 — Fire TV Client Technology: React Native + TypeScript
 
-**Status:** Accepted
+**Status:** Superseded by TD-005
 
-The initial Threshold Fire TV client will target Fire OS using React Native and TypeScript.
+React Native + TypeScript was initially selected for the Fire TV client. During project-foundation validation, the generated React Native 0.82.1 Android project encountered repeated build-tooling issues within the pnpm monorepo, including Gradle plugin resolution and JVM toolchain compatibility failures.
 
-The hackathon development target is Fire OS 7 hardware.
+The framework was rejected before application development began.
 
-### Rationale
+### Original Rationale
 
-- Maintains TypeScript across most of the Threshold codebase.
-- Fire TV supports Android-compatible application development. 
-- Enables testing directly on physical Fire TV hardware.
-- Avoids introducing a separate application language unless platform limitations require it.
+- Maintained TypeScript across most of the Threshold codebase.
+- Fire TV supports Android-compatible application development.
+- Enabled testing directly on physical Fire TV hardware.
+- Avoided introducing a separate application language unless platform limitations required it.
 
-This decision may be revisited if Fire TV-specific limitations make React Native unsuitable for required functionality.
-
-TypeScript is pinned to a stable version compatible with the current React Native ecosystems rather than tracking the newest compiler release during the hackathon.
+---
 
 ## TD-004 — Stable Toolchain Versions
 
 **Status:** Accepted
 
-Threshold pins 10.18.0 and TypeScript 6.9.3 for hackathon development.
+Threshold pins pnpm 10.18.0 and TypeScript 5.9.3 for hackathon development.
 
-## Rationale
+### Rationale
 
-The project priorities predictable tooling and ecosystem compatibility over adopting newly released major versions during the hackathon. Toolchain upgrades can be evaluated after the submission period.
+The project prioritizes predictable tooling and ecosystem compatibility over adopting newly released major versions during the hackathon. Toolchain upgrades can be evaluated after the submission period.
+
+---
+
+## TD-005 — Fire TV Client Technology: Native Android/Kotlin
+
+**Status:** Accepted
+
+The Threshold Fire TV client uses native Android with Kotlin.
+
+The client targets Fire OS 7 compatibility with `minSdk 28` and is intentionally designed as a thin client. Authoritative game state, AI orchestration, and core game logic remain outside the Fire TV application.
+
+Native Android was selected after validating the complete development pipeline on physical target hardware:
+
+1. Compiled the application locally using Gradle.
+2. Produced a debug APK.
+3. Connected to a Fire TV Stick over the local network using ADB.
+4. Installed the APK directly on the device.
+5. Successfully launched Threshold on physical Fire TV hardware.
+
+### Rationale
+
+- Provides direct access to the Android platform underlying the target Fire TV hardware.
+- Reduces framework and dependency complexity in the Fire TV client.
+- Supports direct handling of Fire TV remote input, application lifecycle, networking, and display behavior.
+- Keeps the Fire TV application intentionally thin while TypeScript remains the primary language for the rest of the Threshold platform.
+- Uses a development and deployment pipeline already validated on physical Fire TV hardware.
