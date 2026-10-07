@@ -94,3 +94,17 @@ Native Android was selected after validating the complete development pipeline o
 - Supports direct handling of Fire TV remote input, application lifecycle, networking, and display behavior.
 - Keeps the Fire TV application intentionally thin while TypeScript remains the primary language for the rest of the Threshold platform.
 - Uses a development and deployment pipeline already validated on physical Fire TV hardware.
+
+---
+
+## TD-006 — Local Cross-Device Session Coordination
+
+**Decision:** Introduce a lightweight TypeScript session service to coordinate state between Threshold devices during local development.
+
+The Lens joins a session through an HTTP endpoint, while the Fire TV polls the session state and reacts to connected players. Device-specific service URLs are injected through machine-local configuration (`.env.local` for Lens and `local.properties`/BuildConfig for Fire TV) rather than committed to source control.
+
+This establishes the first end-to-end Threshold interaction across physical devices:
+
+Lens → Session Service → Fire TV
+
+The local Express service is intentionally temporary infrastructure. The production architecture will replace local session coordination with AWS-hosted services and authoritative persistent state.
