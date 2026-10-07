@@ -60,3 +60,13 @@ The hackathon development target is Fire OS 7 hardware.
 This decision may be revisited if Fire TV-specific limitations make React Native unsuitable for required functionality.
 
 TypeScript is pinned to a stable version compatible with the current React Native ecosystems rather than tracking the newest compiler release during the hackathon.
+
+## TD-004 — Stable Toolchain Versions
+
+**Status:** Accepted
+
+Threshold pins 10.18.0 and TypeScript 6.9.3 for hackathon development.
+
+## Rationale
+
+The project priorities predictable tooling and ecosystem compatibility over adopting newly released major versions during the hackathon. Toolchain upgrades can be evaluated after the submission period.
