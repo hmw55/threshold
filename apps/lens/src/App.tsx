@@ -3,19 +3,55 @@ import "./App.css";
 
 type LensState = "join" | "connected";
 
+const SESSION_SERVICE_URL = import.meta.env.VITE_SESSION_SERVICE_URL;
+
+if (!SESSION_SERVICE_URL) {
+  throw new Error("VITE_SESSION_SERVICE_URL is not configured.");
+}
+
 function App() {
   const [sessionCode, setSessionCode] = useState("");
   const [state, setState] = useState<LensState>("join");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const joinThreshold = () => {
+  const joinThreshold = async () => {
     const normalizedCode = sessionCode.trim().toUpperCase();
 
-    if (!normalizedCode) {
+    if (!normalizedCode || isConnecting) {
       return;
     }
 
-    setSessionCode(normalizedCode);
-    setState("connected");
+    setIsConnecting(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${SESSION_SERVICE_URL}/sessions/${normalizedCode}/join`,
+        {
+          method: "POST",
+        },
+      );
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error("Threshold not found.");
+        }
+
+        throw new Error("Unable to connect to Threshold.");
+      }
+
+      setSessionCode(normalizedCode);
+      setState("connected");
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to connect to Threshold.",
+      );
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   if (state === "connected") {
@@ -65,13 +101,16 @@ function App() {
           autoComplete="off"
         />
 
+        {error && <p className="error">{error}</p>}
+
         <button
           type="button"
           onClick={joinThreshold}
-          disabled={!sessionCode.trim()}
+          disabled={!sessionCode.trim() || isConnecting}
         >
-          Connect Lens
+          {isConnecting ? "Connecting..." : "Connect Lens"}
         </button>
+        
       </section>
     </main>
   );

@@ -28,3 +28,6 @@ npm-debug.log*
 pnpm-debug.log*
 # Gradle
 .gradle/
+
+# Android machine-local configuration
+**/local.properties

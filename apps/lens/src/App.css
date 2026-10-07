@@ -117,3 +117,9 @@ button:disabled {
   border-radius: 50%;
   background: #f5f5f5;
 }
+
+.error {
+  margin: 12px 0 0;
+  color: #ff8a8a;
+  font-size: 0.9rem;
+}

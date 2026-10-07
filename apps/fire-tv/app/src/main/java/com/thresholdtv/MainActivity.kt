@@ -8,6 +8,11 @@ import android.view.KeyEvent
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.thresholdtv.session.ThresholdState
+import android.os.Handler
+import android.os.Looper
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity() {
 
@@ -16,6 +21,65 @@ class MainActivity : Activity() {
     private lateinit var actionView: TextView
 
     private var state: ThresholdState = ThresholdState.Idle
+
+    private val sessionCode = "A7K4"
+    private val sessionServiceUrl = BuildConfig.SESSION_SERVICE_URL
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    private val pollSession = object : Runnable {
+        override fun run() {
+            if (state != ThresholdState.AwaitingPlayers) {
+                return
+            }
+
+            Thread {
+                var connection: HttpURLConnection? = null
+
+                try {
+                    val url = URL("$sessionServiceUrl/sessions/$sessionCode")
+                    connection = url.openConnection() as HttpURLConnection
+
+                    connection.requestMethod = "GET"
+                    connection.connectTimeout = 2000
+                    connection.readTimeout = 2000
+
+                    if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                        val body = connection.inputStream
+                            .bufferedReader()
+                            .use { it.readText() }
+
+                        val session = JSONObject(body)
+                        val playerCount = session.getInt("playerCount")
+
+                        if (playerCount > 0) {
+                            handler.post {
+                                if (state == ThresholdState.AwaitingPlayers) {
+                                    state = ThresholdState.Calibrating
+                                    render()
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // A failed local development poll should not crash the app.
+                } finally {
+                    connection?.disconnect()
+                }
+
+                handler.post {
+                    if (state == ThresholdState.AwaitingPlayers) {
+                        handler.postDelayed(this, 1000)
+                    }
+                }
+            }.start()
+        }
+    }
+
+    private fun startSessionPolling() {
+        handler.removeCallbacks(pollSession)
+        handler.post(pollSession)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,7 +137,7 @@ class MainActivity : Activity() {
                 ThresholdState.AwaitingPlayers
 
             ThresholdState.AwaitingPlayers ->
-                ThresholdState.Calibrating
+                ThresholdState.AwaitingPlayers
 
             ThresholdState.Calibrating ->
                 ThresholdState.ExpeditionReady(
@@ -92,6 +156,10 @@ class MainActivity : Activity() {
                 ThresholdState.Idle
         }
 
+        if (state == ThresholdState.AwaitingPlayers) {
+            startSessionPolling()
+        }
+
         render()
     }
 
@@ -106,7 +174,7 @@ class MainActivity : Activity() {
             ThresholdState.AwaitingPlayers -> {
                 titleView.text = "INITIALIZING"
                 messageView.text = "Awaiting Lens connection."
-                actionView.text = "PRESS SELECT TO SIMULATE CONNECTION"
+                actionView.text = "SESSION CODE: $sessionCode"
             }
 
             ThresholdState.Calibrating -> {

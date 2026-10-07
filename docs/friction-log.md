@@ -80,3 +80,13 @@ Replaced the React Native Fire TV client with a minimal native Android/Kotlin ap
 
 **Suggested Improvement**  
 For time-constrained Fire TV development, validate the complete framework-to-device build pipeline before implementing application functionality. When using React Native inside a pnpm monorepo, explicitly verify Gradle plugin resolution and JVM/Gradle compatibility before committing to the framework.
+
+### DF-002 — Cross-device development networking
+
+**Area:** Local development / networking
+
+Running the Lens and session service inside WSL while testing on physical devices required additional host-network configuration. Development servers running inside WSL were not directly reachable from devices on the local network, requiring Windows port forwarding and firewall rules for the Lens and session-service ports.
+
+Machine-specific network addresses also initially created a risk of leaking local configuration into source control. These values were moved into ignored environment-specific configuration files for both the Lens and Fire TV applications.
+
+**Outcome:** Physical Lens-to-session-service-to-Fire-TV communication was successfully validated over the local network.
