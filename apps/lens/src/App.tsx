@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
 type LensState = "join" | "connected";
@@ -15,6 +15,46 @@ function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState("");
+
+  useEffect(() => {
+    const storedPlayerId = localStorage.getItem("thresholdPlayerId");
+    const storedSessionCode = localStorage.getItem("thresholdSessionCode");
+
+    if (!storedPlayerId || !storedSessionCode) {
+      return;
+    }
+
+    const reconnect = async () => {
+      try {
+        const response = await fetch(
+          `${SESSION_SERVICE_URL}/sessions/${storedSessionCode}/reconnect`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              playerId: storedPlayerId,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          localStorage.removeItem("thresholdPlayerId");
+          localStorage.removeItem("thresholdSessionCode");
+          return;
+        }
+
+        setSessionCode(storedSessionCode);
+        setState("connected");
+      } catch {
+        // Keep the saved identity so the player can reconnect
+        // when the session service becomes available again.
+      }
+    };
+
+    void reconnect();
+  }, []);
 
   const joinThreshold = async () => {
     const normalizedCode = sessionCode.trim().toUpperCase();
@@ -49,6 +89,10 @@ function App() {
         throw new Error("Unable to connect to Threshold.");
       }
 
+      const data = await response.json();
+
+      localStorage.setItem("thresholdPlayerId", data.player.id);
+      localStorage.setItem("thresholdSessionCode", normalizedCode);
       setSessionCode(normalizedCode);
       setState("connected");
     } catch (error) {

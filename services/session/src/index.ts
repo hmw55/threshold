@@ -111,6 +111,39 @@ app.post("/sessions/:code/join", (request, response) => {
   });
 });
 
+app.post("/sessions/:code/reconnect", (request, response) => {
+  const code = request.params.code.toUpperCase();
+  const session = sessions.get(code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const playerId =
+    typeof request.body.playerId === "string"
+      ? request.body.playerId
+      : "";
+
+  const player = session.players.find(
+    (existingPlayer) => existingPlayer.id === playerId,
+  );
+
+  if (!player) {
+    response.status(404).json({
+      error: "player_not_found",
+    });
+    return;
+  }
+
+  response.json({
+    session,
+    player,
+  });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Threshold session service listening on port ${PORT}`);
 });
