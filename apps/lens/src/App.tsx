@@ -14,11 +14,13 @@ function App() {
   const [state, setState] = useState<LensState>("join");
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playerName, setPlayerName] = useState("");
 
   const joinThreshold = async () => {
     const normalizedCode = sessionCode.trim().toUpperCase();
+    const normalizedName = playerName.trim();
 
-    if (!normalizedCode || isConnecting) {
+    if (!normalizedCode || !normalizedName || isConnecting) {
       return;
     }
 
@@ -30,6 +32,12 @@ function App() {
         `${SESSION_SERVICE_URL}/sessions/${normalizedCode}/join`,
         {
           method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: normalizedName,
+          }),
         },
       );
 
@@ -101,12 +109,21 @@ function App() {
           autoComplete="off"
         />
 
+        <input
+          type="text"
+          value={playerName}
+          onChange={(event) => setPlayerName(event.target.value)}
+          placeholder="YOUR NAME"
+          maxLength={16}
+          autoComplete="off"
+        />
+
         {error && <p className="error">{error}</p>}
 
         <button
           type="button"
           onClick={joinThreshold}
-          disabled={!sessionCode.trim() || isConnecting}
+          disabled={!sessionCode.trim() || !playerName.trim() || isConnecting}
         >
           {isConnecting ? "Connecting..." : "Connect Lens"}
         </button>

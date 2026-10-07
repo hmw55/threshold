@@ -1,11 +1,16 @@
 import cors from "cors";
 import express from "express";
 
-type SessionStatus = "awaiting_players" | "connected";
+type SessionStatus = "awaiting_players" | "ready";
+
+interface Player {
+  id: string;
+  name: string;
+}
 
 interface Session {
   code: string;
-  playerCount: number;
+  players: Player[];
   status: SessionStatus;
 }
 
@@ -18,17 +23,42 @@ app.use(express.json());
 
 const sessions = new Map<string, Session>();
 
-sessions.set("A7K4", {
-  code: "A7K4",
-  playerCount: 0,
-  status: "awaiting_players",
-});
+function generateSessionCode(): string {
+  const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+  let code = "";
+
+  for (let index = 0; index < 4; index += 1) {
+    const randomIndex = Math.floor(Math.random() * characters.length);
+    code += characters[randomIndex];
+  }
+
+  return code;
+}
 
 app.get("/health", (_request, response) => {
   response.json({
     status: "ok",
     service: "threshold-session",
   });
+});
+
+app.post("/sessions", (_request, response) => {
+  let code = generateSessionCode();
+
+  while (sessions.has(code)) {
+    code = generateSessionCode();
+  }
+
+  const session: Session = {
+    code,
+    players: [],
+    status: "awaiting_players",
+  };
+
+  sessions.set(code, session);
+
+  response.status(201).json(session);
 });
 
 app.get("/sessions/:code", (request, response) => {
@@ -56,10 +86,29 @@ app.post("/sessions/:code/join", (request, response) => {
     return;
   }
 
-  session.playerCount += 1;
-  session.status = "connected";
+  const name =
+    typeof request.body.name === "string"
+      ? request.body.name.trim()
+      : "";
 
-  response.json(session);
+  if (!name) {
+    response.status(400).json({
+      error: "player_name_required",
+    });
+    return;
+  }
+
+  const player: Player = {
+    id: crypto.randomUUID(),
+    name,
+  };
+
+  session.players.push(player);
+
+  response.status(201).json({
+    session,
+    player,
+  });
 });
 
 app.listen(PORT, "0.0.0.0", () => {

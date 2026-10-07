@@ -22,7 +22,8 @@ class MainActivity : Activity() {
 
     private var state: ThresholdState = ThresholdState.Idle
 
-    private val sessionCode = "A7K4"
+    private var sessionCode: String? = null
+    private var playerNames: List<String> = emptyList()
     private val sessionServiceUrl = BuildConfig.SESSION_SERVICE_URL
 
     private val handler = Handler(Looper.getMainLooper())
@@ -33,11 +34,13 @@ class MainActivity : Activity() {
                 return
             }
 
+            val code = sessionCode ?: return
+
             Thread {
                 var connection: HttpURLConnection? = null
 
                 try {
-                    val url = URL("$sessionServiceUrl/sessions/$sessionCode")
+                    val url = URL("$sessionServiceUrl/sessions/$code")
                     connection = url.openConnection() as HttpURLConnection
 
                     connection.requestMethod = "GET"
@@ -50,14 +53,19 @@ class MainActivity : Activity() {
                             .use { it.readText() }
 
                         val session = JSONObject(body)
-                        val playerCount = session.getInt("playerCount")
+                        val players = session.getJSONArray("players")
 
-                        if (playerCount > 0) {
-                            handler.post {
-                                if (state == ThresholdState.AwaitingPlayers) {
-                                    state = ThresholdState.Calibrating
-                                    render()
-                                }
+                        val names = buildList {
+                            for (index in 0 until players.length()) {
+                                val player = players.getJSONObject(index)
+                                add(player.getString("name"))
+                            }
+                        }
+
+                        handler.post {
+                            if (state == ThresholdState.AwaitingPlayers) {
+                                playerNames = names
+                                render()
                             }
                         }
                     }
@@ -74,6 +82,42 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
+    }
+
+    private fun createSession() {
+        Thread {
+            var connection: HttpURLConnection? = null
+
+            try {
+                val url = URL("$sessionServiceUrl/sessions")
+                connection = url.openConnection() as HttpURLConnection
+
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 2000
+                connection.readTimeout = 2000
+                connection.doOutput = true
+                connection.setFixedLengthStreamingMode(0)
+
+                if (connection.responseCode == HttpURLConnection.HTTP_CREATED) {
+                    val body = connection.inputStream
+                        .bufferedReader()
+                        .use { it.readText() }
+
+                    val session = JSONObject(body)
+                    val code = session.getString("code")
+
+                    handler.post {
+                        sessionCode = code
+                        startSessionPolling()
+                        render()
+                    }
+                }
+            } catch (_: Exception) {
+                // A failed local development request should not crash the app.
+            } finally {
+                connection?.disconnect()
+            }
+        }.start()
     }
 
     private fun startSessionPolling() {
@@ -133,11 +177,17 @@ class MainActivity : Activity() {
 
     private fun advance() {
         state = when (val current = state) {
-            ThresholdState.Idle ->
+            ThresholdState.Idle -> {
+                createSession()
                 ThresholdState.AwaitingPlayers
+            }
 
             ThresholdState.AwaitingPlayers ->
-                ThresholdState.AwaitingPlayers
+                if (playerNames.isNotEmpty()) {
+                    ThresholdState.Calibrating
+                } else {
+                    ThresholdState.AwaitingPlayers
+                }
 
             ThresholdState.Calibrating ->
                 ThresholdState.ExpeditionReady(
@@ -173,8 +223,22 @@ class MainActivity : Activity() {
 
             ThresholdState.AwaitingPlayers -> {
                 titleView.text = "INITIALIZING"
-                messageView.text = "Awaiting Lens connection."
-                actionView.text = "SESSION CODE: $sessionCode"
+
+                messageView.text =
+                    if (playerNames.isEmpty()) {
+                        "Awaiting Lens connection."
+                    } else {
+                        playerNames.joinToString("\n")
+                    }
+
+                actionView.text =
+                    sessionCode?.let { code ->
+                        if (playerNames.isEmpty()) {
+                            "SESSION CODE: $code"
+                        } else {
+                            "SESSION CODE: $code\n\nPRESS SELECT WHEN ALL PLAYERS ARE HERE"
+                        }
+                    } ?: "CREATING SESSION..."
             }
 
             ThresholdState.Calibrating -> {
