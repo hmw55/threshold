@@ -31,3 +31,6 @@ pnpm-debug.log*
 
 # Android machine-local configuration
 **/local.properties
+
+# Local Fire TV device names and ADB addresses
+scripts/fire-tv-devices.local.json
