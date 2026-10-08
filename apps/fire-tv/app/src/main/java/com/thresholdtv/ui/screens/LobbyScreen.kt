@@ -14,9 +14,16 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.thresholdtv.ui.ThresholdTheme
+import com.thresholdtv.ui.components.GlitchCoordinator
+import com.thresholdtv.ui.components.ThresholdButton
 import com.thresholdtv.ui.components.SignalNoiseView
+import com.thresholdtv.session.ConnectedThreshold
 
-class LobbyScreen(context: Context) : FrameLayout(context) {
+class LobbyScreen(
+    context: Context,
+    private val onLeave: () -> Unit,
+    private val onContinue: () -> Unit
+) : FrameLayout(context) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val signalNoise = SignalNoiseView(context)
@@ -90,14 +97,61 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
         useDefaultMargins = false
     }
 
-    private val footer = terminalText(
-        "WAITING FOR OPERATIVES",
+    private val localZoneView = terminalText(
+        "LOCAL THRESHOLD // CONNECTING",
         15f,
-        ThresholdTheme.Colors.Primary,
-        Gravity.CENTER
+        ThresholdTheme.Colors.GlitchCyan,
+        Gravity.START
     )
 
+    private val thresholdListView = terminalText(
+        "SEARCHING FOR THRESHOLDS",
+        14f,
+        ThresholdTheme.Colors.Secondary,
+        Gravity.START
+    ).apply {
+        setLineSpacing(dp(8).toFloat(), 1f)
+    }
+
+    private val leaveButton = ThresholdButton(context).apply {
+        setLabel("LEAVE EXPEDITION")
+        setOnClickListener { onLeave() }
+    }
+
+    private val continueButton = ThresholdButton(context).apply {
+        setLabel("CONTINUE")
+        isEnabled = false
+        setOnClickListener {
+            if (isEnabled) onContinue()
+        }
+        isFocusable = false
+        isFocusableInTouchMode = false
+    }
+
+    private val glitchCoordinator = GlitchCoordinator(
+        glitchTitle = {},
+        glitchFocusedButton = {
+            when {
+                continueButton.hasFocus() && continueButton.isEnabled -> continueButton.glitch()
+                leaveButton.hasFocus() && leaveButton.isEnabled -> leaveButton.glitch()
+            }
+        }
+    )
+
+    val isLeaveFocused: Boolean
+        get() = leaveButton.hasFocus()
+
+    fun setLeaving(leaving: Boolean) {
+        leaveButton.isEnabled = !leaving
+        continueButton.isEnabled = !leaving && playerNames.isNotEmpty()
+        leaveButton.setLabel(if (leaving) "LEAVING..." else "LEAVE EXPEDITION")
+        if (leaving) glitchCoordinator.stop()
+        else if (active) glitchCoordinator.start()
+    }
+
     private var sessionCode: String? = null
+    private var connectedThresholds: List<ConnectedThreshold> = emptyList()
+    private var localZone: String = ""
     private var playerNames: List<String> = emptyList()
     private var cursorVisible = true
     private var active = false
@@ -126,7 +180,7 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
         // Full-screen vertical structure.
         val screen = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(44), dp(28), dp(44), dp(28))
+            setPadding(dp(34), dp(18), dp(34), dp(18))
         }
 
         // HEADER: fixed at top.
@@ -239,34 +293,57 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
 
         middleContent.addView(
             joinArea,
-            verticalParams(top = 22)
+            verticalParams(top = 12)
         )
 
+        // Keep both rosters visible together, even at maximum capacity.
+        val rosterRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+
+        val thresholdColumn = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(localZoneView)
+            addView(
+                terminalText(
+                    "CONNECTED THRESHOLDS",
+                    13f,
+                    ThresholdTheme.Colors.Secondary,
+                    Gravity.START
+                ),
+                verticalParams(top = 14)
+            )
+            addView(thresholdListView, verticalParams(top = 10))
+        }
+
+        rosterRow.addView(
+            thresholdColumn,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(20)
+            }
+        )
+
+        val operativeColumn = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
         val playerHeader = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-
             addView(
                 playerHeading,
-                LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    1f
-                )
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             )
-
             addView(playerCount)
         }
+        operativeColumn.addView(playerHeader)
+        operativeColumn.addView(playerGrid, verticalParams(top = 12))
 
-        middleContent.addView(
-            playerHeader,
-            verticalParams(top = 24)
+        rosterRow.addView(
+            operativeColumn,
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         )
-
-        middleContent.addView(
-            playerGrid,
-            verticalParams(top = 10)
-        )
+        middleContent.addView(rosterRow, verticalParams(top = 20))
 
         val middleScroll = ScrollView(context).apply {
             isFillViewport = false
@@ -285,23 +362,22 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
             )
         )
 
-        // FOOTER: fixed at bottom.
-        screen.addView(
-            footer,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(14)
-            }
-        )
+        // Fixed action bar: Leave left, Continue right.
+        val footerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(leaveButton)
+            addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(continueButton)
+        }
+        screen.addView(footerRow, verticalParams(top = 8))
 
         // Center the content horizontally but use the full
         // screen height so the footer remains visible.
         addView(
             screen,
             LayoutParams(
-                dp(800),
+                dp(900),
                 LayoutParams.MATCH_PARENT,
                 Gravity.TOP or Gravity.CENTER_HORIZONTAL
             )
@@ -316,19 +392,67 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
         active = true
         signalNoise.start()
         handler.post(cursorTick)
+        if (!continueButton.isEnabled) leaveButton.requestFocus()
+        else if (!leaveButton.hasFocus() && !continueButton.hasFocus()) continueButton.requestFocus()
+        glitchCoordinator.start()
     }
 
     fun stop() {
         active = false
         handler.removeCallbacks(cursorTick)
+        glitchCoordinator.stop()
+        leaveButton.stop()
+        continueButton.stop()
         signalNoise.stop()
     }
 
-    fun updateSession(code: String?, players: List<String>) {
-        if (sessionCode == code && playerNames == players) return
+    fun updateSession(
+        code: String?,
+        players: List<String>,
+        thresholds: List<ConnectedThreshold>,
+        localZone: String
+    ) {
+        if (
+            sessionCode == code &&
+            playerNames == players &&
+            connectedThresholds == thresholds &&
+            this.localZone == localZone
+        ) return
+
+        val hadOperatives = playerNames.isNotEmpty()
+        val hasOperatives = players.isNotEmpty()
 
         sessionCode = code
         playerNames = players.toList()
+        connectedThresholds = thresholds.toList()
+        this.localZone = localZone
+
+        // Continue requires at least one connected operative.
+        val canContinue = hasOperatives && leaveButton.isEnabled
+
+        // If Continue is focused when the last operative leaves,
+        // move focus before disabling it.
+        if (!canContinue && continueButton.hasFocus()) {
+            leaveButton.requestFocus()
+        }
+
+        continueButton.isEnabled = canContinue
+        continueButton.isFocusable = canContinue
+        continueButton.isFocusableInTouchMode = canContinue
+
+        if (active) {
+            when {
+                // First operative joins, including after everyone left.
+                !hadOperatives && hasOperatives && canContinue -> {
+                    continueButton.requestFocus()
+                }
+
+                // Last operative disconnects.
+                hadOperatives && !hasOperatives -> {
+                    leaveButton.requestFocus()
+                }
+            }
+        }
 
         update()
     }
@@ -348,6 +472,23 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
 
         codeValue.text = sessionCode ?: "------"
         playerCount.text = playerNames.size.toString().padStart(2, '0')
+
+        localZoneView.text =
+            "LOCAL THRESHOLD // ${localZone.ifEmpty { "CONNECTING" }}"
+
+        thresholdListView.text = if (connectedThresholds.isEmpty()) {
+            "SEARCHING FOR THRESHOLDS"
+        } else {
+            connectedThresholds.mapIndexed { index, threshold ->
+                val marker = if (threshold.zoneName == localZone) {
+                    "  ◀ YOU"
+                } else {
+                    ""
+                }
+                "${(index + 1).toString().padStart(2, '0')}  " +
+                    threshold.zoneName + marker
+            }.joinToString("\n")
+        }
 
         renderPlayers()
         updateStatus()
@@ -380,11 +521,11 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
 
             val nameView = terminalText(
                 name,
-                21f,
+                16f,
                 palette[index % palette.size],
                 Gravity.START
             ).apply {
-                setPadding(0, dp(6), dp(8), dp(6))
+                setPadding(0, dp(5), dp(6), dp(5))
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
@@ -416,16 +557,7 @@ class LobbyScreen(context: Context) : FrameLayout(context) {
                 "${playerNames.size} OPERATIVE(S) CONNECTED$cursor"
         }
 
-        footer.text = when {
-            sessionCode == null ->
-                "INITIALIZING SESSION"
 
-            playerNames.isEmpty() ->
-                "WAITING FOR OPERATIVES"
-
-            else ->
-                "PRESS SELECT TO CONTINUE"
-        }
     }
 
     private fun verticalParams(

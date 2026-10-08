@@ -8,7 +8,14 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "fire-tv:dev": "cd apps/fire-tv && ./gradlew assembleDebug && cd ../.. && adb install -r apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk && adb shell am force-stop com.thresholdtv && adb shell am start -n com.thresholdtv/.MainActivity"
+    "fire-tv:dev": "bash scripts/fire-tv-dev.sh",
+    "fire-tv:deploy:all": "bash scripts/fire-tv-all.sh deploy",
+    "fire-tv:launch:all": "bash scripts/fire-tv-all.sh launch"
+  },
+  "scriptsInfo": {
+    "fire-tv:dev": "Build, install, and launch Threshold on a named Fire TV. Run without arguments for an interactive device selector, or pass monitor, bedroom, or guest.",
+    "fire-tv:deploy:all": "Build once and install Threshold on every connected authorized ADB device.",
+    "fire-tv:launch:all": "Launch Threshold on every connected authorized ADB device without rebuilding."
   },
   "engines": {
     "node": ">=22"
