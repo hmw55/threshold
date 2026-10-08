@@ -17,14 +17,16 @@ import com.thresholdtv.ui.components.ThresholdButton
 
 class HomeScreen(
     context: Context,
-    private val onBeginExpedition: () -> Unit,
+    private val onCreateExpedition: () -> Unit,
+    private val onJoinExpedition: () -> Unit,
     onAboutThreshold: () -> Unit
 ) : FrameLayout(context) {
 
     private val signalNoiseView = SignalNoiseView(context)
     private val titleView = GlitchTextView(context)
 
-    private val beginButton = ThresholdButton(context)
+    private val createButton = ThresholdButton(context)
+    private val joinButton = ThresholdButton(context)
     private val aboutButton = ThresholdButton(context)
 
     private val terminalView = TerminalView(context)
@@ -36,7 +38,8 @@ class HomeScreen(
         },
         glitchFocusedButton = {
             when {
-                beginButton.hasFocus() -> beginButton.glitch()
+                createButton.hasFocus() -> createButton.glitch()
+                joinButton.hasFocus() -> joinButton.glitch()
                 aboutButton.hasFocus() -> aboutButton.glitch()
             }
         }
@@ -45,7 +48,6 @@ class HomeScreen(
     init {
         setBackgroundColor(ThresholdTheme.Colors.Background)
 
-        // Background: animated signal interference.
         addView(
             signalNoiseView,
             LayoutParams(
@@ -54,7 +56,6 @@ class HomeScreen(
             )
         )
 
-        // Foreground: main menu.
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -78,10 +79,17 @@ class HomeScreen(
             includeFontPadding = false
         }
 
-        beginButton.apply {
-            setLabel("BEGIN EXPEDITION")
+        createButton.apply {
+            setLabel("CREATE EXPEDITION")
             setOnClickListener {
-                onBeginExpedition()
+                onCreateExpedition()
+            }
+        }
+
+        joinButton.apply {
+            setLabel("JOIN EXPEDITION")
+            setOnClickListener {
+                onJoinExpedition()
             }
         }
 
@@ -97,7 +105,17 @@ class HomeScreen(
             gravity = Gravity.CENTER
 
             addView(
-                beginButton,
+                createButton,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    marginEnd = ThresholdTheme.Spacing.ButtonGap
+                }
+            )
+
+            addView(
+                joinButton,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
@@ -151,7 +169,6 @@ class HomeScreen(
             )
         )
 
-        // Overlay: About terminal, initially hidden.
         terminalView.visibility = View.GONE
 
         addView(
@@ -165,8 +182,7 @@ class HomeScreen(
     }
 
     fun activate() {
-        beginButton.requestFocus()
-
+        createButton.requestFocus()
         signalNoiseView.start()
         glitchCoordinator.start()
     }
@@ -180,7 +196,8 @@ class HomeScreen(
         terminalOpen = false
 
         titleView.stop()
-        beginButton.stop()
+        createButton.stop()
+        joinButton.stop()
         aboutButton.stop()
     }
 
@@ -188,12 +205,11 @@ class HomeScreen(
         if (terminalOpen) return
 
         terminalOpen = true
-
-        // Keep background interference running.
-        // Pause title and button glitches while reading.
         glitchCoordinator.stop()
+
         titleView.stop()
-        beginButton.stop()
+        createButton.stop()
+        joinButton.stop()
         aboutButton.stop()
 
         terminalView.visibility = View.VISIBLE
@@ -204,7 +220,6 @@ class HomeScreen(
         if (!terminalOpen) return
 
         terminalOpen = false
-
         terminalView.stop()
         terminalView.visibility = View.GONE
 
