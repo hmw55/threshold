@@ -10,6 +10,7 @@ import android.widget.TextView
 import com.thresholdtv.session.ExpeditionSession
 import com.thresholdtv.session.SessionController
 import com.thresholdtv.session.ThresholdState
+import com.thresholdtv.session.ConnectedThreshold
 import com.thresholdtv.ui.ThresholdTheme
 import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
@@ -25,8 +26,10 @@ class MainActivity : Activity() {
     private var state: ThresholdState = ThresholdState.Idle
     private var showingJoin = false
     private var connecting = false
+    private var leaving = false
 
     private var sessionCode: String? = null
+    private var connectedThresholds: List<ConnectedThreshold> = emptyList()
     private var playerNames: List<String> = emptyList()
     private var localZone: String = ""
 
@@ -52,7 +55,11 @@ class MainActivity : Activity() {
             onCancel = ::cancelJoin
         )
 
-        lobby = LobbyScreen(this)
+        lobby = LobbyScreen(
+            context = this,
+            onLeave = ::leaveExpedition,
+            onContinue = ::advance
+        )
 
         showHome()
     }
@@ -109,6 +116,7 @@ class MainActivity : Activity() {
 
         sessionCode = session.code
         playerNames = session.playerNames
+        connectedThresholds = session.thresholds
         localZone = zone
 
         if (state == ThresholdState.AwaitingPlayers) {
@@ -144,7 +152,9 @@ class MainActivity : Activity() {
     private fun showLobby() {
         lobby.updateSession(
             code = sessionCode,
-            players = playerNames
+            players = playerNames,
+            thresholds = connectedThresholds,
+            localZone = localZone
         )
 
         if (lobby.parent == null) {
@@ -158,17 +168,6 @@ class MainActivity : Activity() {
         keyCode: Int,
         event: KeyEvent?
     ): Boolean {
-        if (
-            state == ThresholdState.AwaitingPlayers &&
-            !connecting &&
-            playerNames.isNotEmpty() &&
-            (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                keyCode == KeyEvent.KEYCODE_ENTER)
-        ) {
-            advance()
-            return true
-        }
-
         if (
             state != ThresholdState.Idle &&
             state != ThresholdState.AwaitingPlayers &&
@@ -280,25 +279,58 @@ class MainActivity : Activity() {
         setContentView(layout)
     }
 
+    private fun leaveExpedition() {
+        if (leaving || connecting) return
+        if (state != ThresholdState.AwaitingPlayers) return
+
+        leaving = true
+        lobby.setLeaving(true)
+
+        sessions.leave(
+            onSuccess = {
+                leaving = false
+                lobby.setLeaving(false)
+                reset()
+                showHome()
+            },
+            onFailure = { message ->
+                leaving = false
+                lobby.setLeaving(false)
+
+                android.widget.Toast.makeText(
+                    this,
+                    message,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
     private fun reset() {
         sessions.stop()
         lobby.stop()
         sessionCode = null
+        connectedThresholds = emptyList()
         playerNames = emptyList()
         localZone = ""
         connecting = false
         showingJoin = false
+        leaving = false
+        lobby.setLeaving(false)
         state = ThresholdState.Idle
     }
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (showingJoin && !connecting) {
-            cancelJoin()
-            return
-        }
+        when {
+            showingJoin -> cancelJoin()
 
-        super.onBackPressed()
+            state == ThresholdState.AwaitingPlayers -> {
+                leaveExpedition()
+            }
+
+            else -> super.onBackPressed()
+        }
     }
 
     override fun onDestroy() {

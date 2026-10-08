@@ -20,6 +20,7 @@ class SessionController(
     private val handler = Handler(Looper.getMainLooper())
 
     private var active = false
+    private var leaving = false
     private var generation = 0
     private var code: String? = null
     private var zone: String? = null
@@ -35,7 +36,7 @@ class SessionController(
                     val session = client.getExpedition(currentCode)
 
                     handler.post {
-                        if (active && generation == currentGeneration) {
+                        if (active && !leaving && generation == currentGeneration) {
                             onUpdate(session, zone.orEmpty())
                         }
                     }
@@ -105,8 +106,60 @@ class SessionController(
         }.start()
     }
 
+    fun leave(
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+
+        if (!active || leaving) return
+
+        leaving = true
+        handler.removeCallbacks(poll)
+
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                client.leaveExpedition(currentCode)
+
+                handler.post {
+                    if (generation != currentGeneration) return@post
+
+                    stop()
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Failed to leave Expedition", e)
+
+                handler.post {
+                    if (generation != currentGeneration) return@post
+
+                    leaving = false
+
+                    val message = when (e) {
+                        is SessionException ->
+                            "LEAVE FAILED (${e.statusCode})"
+                        else ->
+                            "UNABLE TO CONTACT SESSION SERVICE"
+                    }
+
+                    onFailure(message)
+
+                    if (active) {
+                        handler.post(poll)
+                    }
+                }
+            }
+        }.start()
+    }
+
     fun stop() {
         active = false
+        leaving = false
         generation++
         code = null
         zone = null

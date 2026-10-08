@@ -95,6 +95,13 @@ class SessionClient(
             )
         )
 
+    fun leaveExpedition(code: String) {
+        request(
+            method = "DELETE",
+            path = "/sessions/${normalizeCode(code)}/thresholds/$deviceId"
+        )
+    }
+
     private fun normalizeCode(code: String): String {
         val normalized = code.trim().uppercase()
 

@@ -80,6 +80,15 @@ function createThreshold(
   };
 }
 
+function findAvailableZoneIndex(session: Session): number {
+  return ZONE_NAMES.findIndex(
+    (zoneName) =>
+      !session.thresholds.some(
+        (threshold) => threshold.zoneName === zoneName
+      )
+  );
+}
+
 
 function readDeviceId(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -228,10 +237,17 @@ app.post(
       return;
     }
 
-    const threshold = createThreshold(
-      deviceId,
-      session.thresholds.length
-    );
+    const zoneIndex = findAvailableZoneIndex(session);
+
+    if (zoneIndex === -1) {
+      response.status(409).json({
+        error: "threshold_limit_reached",
+        limit: MAX_THRESHOLDS,
+      });
+      return;
+    }
+
+    const threshold = createThreshold(deviceId, zoneIndex);
 
     session.thresholds.push(threshold);
 
@@ -282,6 +298,60 @@ app.post(
       session,
       threshold,
       reconnected: true,
+    });
+  }
+);
+
+// Remove a Fire TV from an Expedition.
+// Remaining TVs retain their zones and Expedition code.
+// The final TV leaving closes the Expedition.
+app.delete(
+  "/sessions/:code/thresholds/:deviceId",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const deviceId = readDeviceId(request.params.deviceId);
+
+    if (!deviceId) {
+      response.status(400).json({
+        error: "invalid_device_id",
+      });
+      return;
+    }
+
+    const thresholdIndex = session.thresholds.findIndex(
+      (threshold) => threshold.deviceId === deviceId
+    );
+
+    if (thresholdIndex === -1) {
+      response.status(404).json({
+        error: "threshold_not_found",
+      });
+      return;
+    }
+
+    session.thresholds.splice(thresholdIndex, 1);
+
+    if (session.thresholds.length === 0) {
+      sessions.delete(session.code);
+
+      response.json({
+        closed: true,
+        code: session.code,
+      });
+      return;
+    }
+
+    response.json({
+      closed: false,
+      session,
     });
   }
 );
@@ -362,6 +432,43 @@ app.post(
     response.json({
       session,
       player,
+    });
+  }
+);
+
+// Remove an operative from an Expedition.
+// The Expedition remains active for connected Fire TVs.
+// The operative can join again using the same code.
+app.delete(
+  "/sessions/:code/players/:playerId",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const playerId = request.params.playerId;
+
+    const playerIndex = session.players.findIndex(
+      (player) => player.id === playerId
+    );
+
+    if (playerIndex === -1) {
+      response.status(404).json({
+        error: "player_not_found",
+      });
+      return;
+    }
+
+    session.players.splice(playerIndex, 1);
+    updateSessionStatus(session);
+
+    response.json({
+      session,
     });
   }
 );

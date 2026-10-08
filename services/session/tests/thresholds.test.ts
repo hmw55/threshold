@@ -134,4 +134,126 @@ describe("Multi-Threshold registration", () => {
       "session_not_found"
     );
   });
+
+  it("allows a TV to leave without closing the Expedition", async () => {
+    await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "bedroom" })
+      .expect(201);
+
+    const response = await request(app)
+      .delete(`/sessions/${code}/thresholds/monitor`)
+      .expect(200);
+
+    expect(response.body.closed).toBe(false);
+    expect(response.body.session.code).toBe(code);
+    expect(response.body.session.thresholds).toHaveLength(1);
+    expect(response.body.session.thresholds[0].deviceId).toBe(
+      "bedroom"
+    );
+    expect(response.body.session.thresholds[0].zoneName).toBe(
+      "THE VEIL"
+    );
+  });
+
+  it("preserves remaining zone assignments when another TV leaves", async () => {
+    for (const deviceId of ["bedroom", "guest", "office"]) {
+      await request(app)
+        .post(`/sessions/${code}/thresholds`)
+        .send({ deviceId })
+        .expect(201);
+    }
+
+    await request(app)
+      .delete(`/sessions/${code}/thresholds/bedroom`)
+      .expect(200);
+
+    const response = await request(app)
+      .get(`/sessions/${code}`)
+      .expect(200);
+
+    expect(
+      response.body.thresholds.map(
+        (threshold: { deviceId: string; zoneName: string }) => [
+          threshold.deviceId,
+          threshold.zoneName,
+        ]
+      )
+    ).toEqual([
+      ["monitor", "THE NEXUS"],
+      ["guest", "THE RELIQUARY"],
+      ["office", "THE OBSERVATORY"],
+    ]);
+  });
+
+  it("reuses an available zone without duplicating assignments", async () => {
+    await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "bedroom" })
+      .expect(201);
+
+    await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "guest" })
+      .expect(201);
+
+    await request(app)
+      .delete(`/sessions/${code}/thresholds/bedroom`)
+      .expect(200);
+
+    const joined = await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "office" })
+      .expect(201);
+
+    expect(joined.body.threshold.zoneName).toBe("THE VEIL");
+
+    const zones = joined.body.session.thresholds.map(
+      (threshold: { zoneName: string }) => threshold.zoneName
+    );
+
+    expect(new Set(zones).size).toBe(zones.length);
+  });
+
+  it("closes the Expedition when the final TV leaves", async () => {
+    const response = await request(app)
+      .delete(`/sessions/${code}/thresholds/monitor`)
+      .expect(200);
+
+    expect(response.body).toEqual({
+      closed: true,
+      code,
+    });
+
+    const lookup = await request(app)
+      .get(`/sessions/${code}`)
+      .expect(404);
+
+    expect(lookup.body.error).toBe("session_not_found");
+  });
+
+  it("prevents a departed TV from reconnecting without joining again", async () => {
+    await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "bedroom" })
+      .expect(201);
+
+    await request(app)
+      .delete(`/sessions/${code}/thresholds/bedroom`)
+      .expect(200);
+
+    const reconnect = await request(app)
+      .post(`/sessions/${code}/thresholds/reconnect`)
+      .send({ deviceId: "bedroom" })
+      .expect(404);
+
+    expect(reconnect.body.error).toBe("threshold_not_found");
+
+    const rejoined = await request(app)
+      .post(`/sessions/${code}/thresholds`)
+      .send({ deviceId: "bedroom" })
+      .expect(201);
+
+    expect(rejoined.body.threshold.zoneName).toBe("THE VEIL");
+  });
 });
