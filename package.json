@@ -7,7 +7,8 @@
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "fire-tv:dev": "cd apps/fire-tv && ./gradlew assembleDebug && cd ../.. && adb install -r apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk && adb shell am force-stop com.thresholdtv && adb shell am start -n com.thresholdtv/.MainActivity"
   },
   "engines": {
     "node": ">=22"
