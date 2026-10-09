@@ -1,4 +1,19 @@
-import { randomInt, randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
+import {
+  clearSessions,
+  deleteSession,
+  loadSessions,
+  saveSession,
+  savePlayerCredential,
+  getPlayerCredentialHash,
+  deletePlayerCredential,
+} from "./sessionStore.js";
 import cors from "cors";
 import express from "express";
 
@@ -40,7 +55,7 @@ const ZONE_NAMES = [
   "THE OBSERVATORY",
 ] as const;
 
-const sessions = new Map<string, Session>();
+const sessions = loadSessions<Session>();
 
 export const app = express();
 
@@ -107,6 +122,41 @@ function readDeviceId(value: unknown): string | null {
   return deviceId;
 }
 
+function createPlayerToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+function hashPlayerToken(token: string): string {
+  return createHash("sha256")
+    .update(token)
+    .digest("hex");
+}
+
+function verifyPlayerToken(
+  playerId: string,
+  token: unknown
+): boolean {
+  if (
+    typeof token !== "string" ||
+    !/^[a-f0-9]{64}$/.test(token)
+  ) {
+    return false;
+  }
+
+  const storedHash = getPlayerCredentialHash(playerId);
+
+  if (!storedHash) {
+    return false;
+  }
+
+  const suppliedHash = hashPlayerToken(token);
+
+  return timingSafeEqual(
+    Buffer.from(storedHash, "hex"),
+    Buffer.from(suppliedHash, "hex")
+  );
+}
+
 function getSession(code: string): Session | undefined {
   return sessions.get(code.toUpperCase());
 }
@@ -166,6 +216,7 @@ app.post("/sessions", (request, response) => {
   }
 
   sessions.set(code, session);
+  saveSession(code, session);
 
   response.status(201).json(session);
 });
@@ -250,6 +301,7 @@ app.post(
     const threshold = createThreshold(deviceId, zoneIndex);
 
     session.thresholds.push(threshold);
+    saveSession(session.code, session);
 
     response.status(201).json({
       session,
@@ -340,7 +392,12 @@ app.delete(
     session.thresholds.splice(thresholdIndex, 1);
 
     if (session.thresholds.length === 0) {
+      for (const player of session.players) {
+        deletePlayerCredential(player.id);
+      }
+
       sessions.delete(session.code);
+      deleteSession(session.code);
 
       response.json({
         closed: true,
@@ -349,12 +406,189 @@ app.delete(
       return;
     }
 
+    saveSession(session.code, session);
+
     response.json({
       closed: false,
       session,
     });
   }
 );
+
+
+const PHASE_TRANSITIONS: Partial<
+  Record<ExpeditionPhase, ExpeditionPhase>
+> = {
+  lobby: "calibrating",
+  calibrating: "ready",
+  ready: "playing",
+  playing: "results",
+};
+
+// Advance the shared Expedition phase.
+// Only a registered Fire TV may request a transition.
+app.post("/sessions/:code/advance", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const deviceId = readDeviceId(request.body?.deviceId);
+
+  if (!deviceId) {
+    response.status(400).json({
+      error: "device_id_required",
+    });
+    return;
+  }
+
+  const registered = session.thresholds.some(
+    (threshold) => threshold.deviceId === deviceId,
+  );
+
+  if (!registered) {
+    response.status(403).json({
+      error: "threshold_not_registered",
+    });
+    return;
+  }
+
+  if (session.phase === "lobby" && session.status !== "ready") {
+    response.status(409).json({
+      error: "expedition_not_ready",
+    });
+    return;
+  }
+
+  const nextPhase = PHASE_TRANSITIONS[session.phase];
+
+  if (!nextPhase) {
+    response.status(409).json({
+      error: "expedition_already_complete",
+    });
+    return;
+  }
+
+  session.phase = nextPhase;
+  saveSession(session.code, session);
+
+  response.json({ session });
+});
+
+
+/**
+ * Return an Expedition from calibration to the lobby.
+ *
+ * Only a registered Fire TV can request this transition.
+ * Players, Thresholds, and the Expedition code are preserved.
+ */
+app.post("/sessions/:code/back", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const deviceId = readDeviceId(request.body?.deviceId);
+
+  if (!deviceId) {
+    response.status(400).json({
+      error: "device_id_required",
+    });
+    return;
+  }
+
+  const registered = session.thresholds.some(
+    (threshold) => threshold.deviceId === deviceId,
+  );
+
+  if (!registered) {
+    response.status(403).json({
+      error: "threshold_not_registered",
+    });
+    return;
+  }
+
+  if (session.phase !== "calibrating") {
+    response.status(409).json({
+      error: "invalid_phase_transition",
+    });
+    return;
+  }
+
+  session.phase = "lobby";
+  saveSession(session.code, session);
+
+  response.json({ session });
+});
+
+
+
+/**
+ * Restart an Expedition without disconnecting anyone.
+ *
+ * Preserves the Expedition code, registered Fire TVs,
+ * connected operatives, and assigned Threshold zones.
+ *
+ * Only a registered Fire TV can restart an Expedition.
+ */
+app.post("/sessions/:code/restart", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const deviceId = readDeviceId(request.body?.deviceId);
+
+  if (!deviceId) {
+    response.status(400).json({
+      error: "device_id_required",
+    });
+    return;
+  }
+
+  const registered = session.thresholds.some(
+    (threshold) => threshold.deviceId === deviceId,
+  );
+
+  if (!registered) {
+    response.status(403).json({
+      error: "threshold_not_registered",
+    });
+    return;
+  }
+
+  // Restarting is allowed from any phase except the lobby.
+  if (session.phase === "lobby") {
+    response.status(409).json({
+      error: "expedition_already_in_lobby",
+    });
+    return;
+  }
+
+  // Preserve players, devices, and the expedition code.
+  session.phase = "lobby";
+  updateSessionStatus(session);
+
+  saveSession(session.code, session);
+
+  response.json({
+    session,
+    restarted: true,
+  });
+});
+
 
 // Existing Lens player joining endpoint.
 app.post("/sessions/:code/join", (request, response) => {
@@ -391,12 +625,21 @@ app.post("/sessions/:code/join", (request, response) => {
     name,
   };
 
+  const playerToken = createPlayerToken();
+
+  savePlayerCredential(
+    player.id,
+    hashPlayerToken(playerToken)
+  );
+
   session.players.push(player);
   updateSessionStatus(session);
+  saveSession(session.code, session);
 
   response.status(201).json({
     session,
     player,
+    playerToken,
   });
 });
 
@@ -425,6 +668,13 @@ app.post(
     if (!player) {
       response.status(404).json({
         error: "player_not_found",
+      });
+      return;
+    }
+
+    if (!verifyPlayerToken(player.id, request.body?.playerToken)) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
       });
       return;
     }
@@ -464,8 +714,22 @@ app.delete(
       return;
     }
 
+    const token = request.get("Authorization")?.replace(
+      /^Bearer\s+/i,
+      ""
+    );
+
+    if (!verifyPlayerToken(playerId, token)) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
+      });
+      return;
+    }
+
     session.players.splice(playerIndex, 1);
+    deletePlayerCredential(playerId);
     updateSessionStatus(session);
+    saveSession(session.code, session);
 
     response.json({
       session,
@@ -479,4 +743,5 @@ export function resetSessionsForTesting(): void {
   }
 
   sessions.clear();
+  clearSessions();
 }

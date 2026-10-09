@@ -3,7 +3,7 @@ import request from "supertest";
 import {
   app,
   resetSessionsForTesting,
-} from "../src/app";
+} from "../src/app.js";
 
 describe("Lens operative departure", () => {
   beforeEach(() => {
@@ -26,9 +26,11 @@ describe("Lens operative departure", () => {
     expect(joined.body.session.status).toBe("ready");
 
     const playerId = joined.body.player.id;
+    const playerToken = joined.body.playerToken;
 
     const left = await request(app)
       .delete(`/sessions/${code}/players/${playerId}`)
+      .set("Authorization", `Bearer ${playerToken}`)
       .expect(200);
 
     expect(left.body.session.players).toHaveLength(0);
@@ -59,6 +61,10 @@ describe("Lens operative departure", () => {
       .delete(
         `/sessions/${code}/players/${firstJoin.body.player.id}`
       )
+      .set(
+        "Authorization",
+        `Bearer ${firstJoin.body.playerToken}`
+      )
       .expect(200);
 
     const secondJoin = await request(app)
@@ -84,5 +90,32 @@ describe("Lens operative departure", () => {
         `/sessions/${created.body.code}/players/unknown-player`
       )
       .expect(404);
+  });
+
+  it("rejects departure without operative credentials", async () => {
+    const created = await request(app)
+      .post("/sessions")
+      .send({ deviceId: "tv-1" })
+      .expect(201);
+
+    const code = created.body.code;
+
+    const joined = await request(app)
+      .post(`/sessions/${code}/join`)
+      .send({ name: "Mack" })
+      .expect(201);
+
+    const playerId = joined.body.player.id;
+
+    await request(app)
+      .delete(`/sessions/${code}/players/${playerId}`)
+      .expect(401);
+
+    const session = await request(app)
+      .get(`/sessions/${code}`)
+      .expect(200);
+
+    expect(session.body.players).toHaveLength(1);
+    expect(session.body.players[0].id).toBe(playerId);
   });
 });
