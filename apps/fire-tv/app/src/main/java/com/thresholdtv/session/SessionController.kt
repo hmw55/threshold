@@ -106,6 +106,158 @@ class SessionController(
         }.start()
     }
 
+    fun advance(
+        onSuccess: (ExpeditionSession) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                val updatedSession =
+                    client.advanceExpedition(currentCode)
+
+                handler.post {
+                    if (!active || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    onUpdate(updatedSession, zone.orEmpty())
+                    onSuccess(updatedSession)
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Failed to advance Expedition", e)
+
+                handler.post {
+                    if (!active || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    val message = when (e) {
+                        is SessionException ->
+                            "ADVANCE FAILED (${e.statusCode})"
+                        else ->
+                            "UNABLE TO CONTACT SESSION SERVICE"
+                    }
+
+                    onFailure(message)
+                }
+            }
+        }.start()
+    }
+
+
+    fun back(
+        onSuccess: (ExpeditionSession) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                val updatedSession =
+                    client.returnToLobby(currentCode)
+
+                handler.post {
+                    if (!active || leaving || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    onUpdate(updatedSession, zone.orEmpty())
+                    onSuccess(updatedSession)
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Failed to return to lobby", e)
+
+                handler.post {
+                    if (!active || leaving || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    val message = when (e) {
+                        is SessionException ->
+                            "RETURN FAILED (${e.statusCode})"
+                        else ->
+                            "UNABLE TO CONTACT SESSION SERVICE"
+                    }
+
+                    onFailure(message)
+                }
+            }
+        }.start()
+    }
+
+
+    fun restart(
+        onSuccess: (ExpeditionSession) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                val updatedSession =
+                    client.restartExpedition(currentCode)
+
+                handler.post {
+                    if (!active || leaving || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    onUpdate(updatedSession, zone.orEmpty())
+                    onSuccess(updatedSession)
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Failed to restart Expedition", e)
+
+                handler.post {
+                    if (!active || leaving || generation != currentGeneration) {
+                        return@post
+                    }
+
+                    val message = when (e) {
+                        is SessionException ->
+                            "RESTART FAILED (${e.statusCode})"
+                        else ->
+                            "UNABLE TO CONTACT SESSION SERVICE"
+                    }
+
+                    onFailure(message)
+                }
+            }
+        }.start()
+    }
+
     fun leave(
         onSuccess: () -> Unit,
         onFailure: (String) -> Unit

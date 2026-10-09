@@ -95,6 +95,39 @@ class SessionClient(
             )
         )
 
+    fun advanceExpedition(code: String): ExpeditionSession =
+        parseSession(
+            request(
+                method = "POST",
+                path = "/sessions/${normalizeCode(code)}/advance",
+                payload = JSONObject()
+                    .put("deviceId", deviceId)
+            ).getJSONObject("session")
+        )
+
+
+    fun returnToLobby(code: String): ExpeditionSession =
+        parseSession(
+            request(
+                method = "POST",
+                path = "/sessions/${normalizeCode(code)}/back",
+                payload = JSONObject()
+                    .put("deviceId", deviceId)
+            ).getJSONObject("session")
+        )
+
+
+    fun restartExpedition(code: String): ExpeditionSession =
+        parseSession(
+            request(
+                method = "POST",
+                path = "/sessions/${normalizeCode(code)}/restart",
+                payload = JSONObject()
+                    .put("deviceId", deviceId)
+            ).getJSONObject("session")
+        )
+
+
     fun leaveExpedition(code: String) {
         request(
             method = "DELETE",
