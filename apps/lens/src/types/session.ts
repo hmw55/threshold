@@ -21,4 +21,5 @@ export interface ExpeditionSession {
 export interface PlayerConnection {
   session: ExpeditionSession;
   player: Player;
+  playerToken: string;
 }

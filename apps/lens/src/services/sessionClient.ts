@@ -32,7 +32,9 @@ async function request<T>(
     ...options,
     headers: {
       Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.body && !(options.body instanceof FormData)
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...options.headers,
     },
   });
@@ -76,12 +78,13 @@ export const sessionClient = {
   reconnect(
     code: string,
     playerId: string,
+    playerToken: string,
   ): Promise<PlayerConnection> {
     return request<PlayerConnection>(
       `/sessions/${normalizeCode(code)}/reconnect`,
       {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId, playerToken }),
       },
     );
   },
@@ -92,11 +95,19 @@ export const sessionClient = {
     );
   },
 
-  async leave(code: string, playerId: string): Promise<void> {
+
+  async leave(
+    code: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<void> {
     await request<{ session: ExpeditionSession }>(
       `/sessions/${normalizeCode(code)}/players/${encodeURIComponent(playerId)}`,
       {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${playerToken}`,
+        },
       },
     );
   },
