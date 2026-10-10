@@ -55,6 +55,10 @@ function App() {
           />
         ) : showScanner ? (
           <RoomScanner
+            sessionCode={session.sessionCode}
+            playerId={session.player!.id}
+            playerToken={session.playerToken!}
+            thresholds={session.thresholds}
             onClose={() => setScannerDismissed(true)}
           />
         ) : (

@@ -1,4 +1,3 @@
-
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   joinExpedition,
@@ -12,6 +11,13 @@ import type {
   LensState,
   Player,
 } from "../types/session";
+
+interface ThresholdZone {
+  id: string;
+  deviceId: string;
+  zoneName: string;
+  joinedAt: string;
+}
 
 const STORAGE = {
   id: "thresholdPlayerId",
@@ -38,9 +44,11 @@ export function useExpeditionSession() {
 
   const [playerName, setPlayerName] = useState("");
   const [player, setPlayer] = useState<Player | null>(null);
+  const [playerToken, setPlayerToken] = useState<string | null>(null);
   const [state, setState] = useState<LensState>("join");
   const [phase, setPhase] =
     useState<ExpeditionSession["phase"]>("lobby");
+  const [thresholds, setThresholds] = useState<ThresholdZone[]>([]);
 
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -72,8 +80,10 @@ export function useExpeditionSession() {
         if (operation.current !== token) return;
 
         setPlayer(restored);
+        setPlayerToken(storedToken);
         setPlayerName(restored.name);
         setPhase(session.phase);
+        setThresholds(session.thresholds);
         setState("connected");
         setError(null);
       })
@@ -116,6 +126,7 @@ export function useExpeditionSession() {
         if (!active) return;
 
         setPhase(session.phase);
+        setThresholds(session.thresholds);
       } catch (reason) {
         if (!active) return;
 
@@ -164,9 +175,11 @@ export function useExpeditionSession() {
       localStorage.setItem(STORAGE.token, connection.playerToken);
 
       setPlayer(connection.player);
+      setPlayerToken(connection.playerToken);
       setSessionCode(code);
       setPlayerName(connection.player.name);
       setPhase(connection.session.phase);
+      setThresholds(connection.session.thresholds);
       setState("connected");
     } catch (reason) {
       if (operation.current === token) {
@@ -201,7 +214,9 @@ export function useExpeditionSession() {
 
       clearIdentity();
       setPlayer(null);
+      setPlayerToken(null);
       setPhase("lobby");
+      setThresholds([]);
       setState("join");
     } catch (reason) {
       setError(
@@ -216,6 +231,8 @@ export function useExpeditionSession() {
 
   return {
     sessionCode,
+    playerToken,
+    thresholds,
     setSessionCode,
     playerName,
     setPlayerName,

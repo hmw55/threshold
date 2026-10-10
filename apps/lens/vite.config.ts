@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: [
-      "electronics-posting-heated-vintage.trycloudflare.com",
+      "dependence-observations-finds-finishing.trycloudflare.com",
     ],
   },
 });

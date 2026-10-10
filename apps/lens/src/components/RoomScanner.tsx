@@ -1,5 +1,8 @@
-
 import { useEffect, useRef, useState } from "react";
+import {
+  sessionClient,
+  type ScanGroup,
+} from "../services/sessionClient";
 
 type CameraStatus =
   | "initializing"
@@ -15,11 +18,33 @@ interface CapturedImage {
   url: string;
 }
 
+interface ThresholdZone {
+  id: string;
+  deviceId: string;
+  zoneName: string;
+  joinedAt: string;
+}
+
+interface ScanTarget {
+  thresholdId: string | null;
+  label: string;
+}
+
 interface RoomScannerProps {
+  sessionCode: string;
+  playerId: string;
+  playerToken: string;
+  thresholds: ThresholdZone[];
   onClose: () => void;
 }
 
-export function RoomScanner({ onClose }: RoomScannerProps) {
+export function RoomScanner({
+  sessionCode,
+  playerId,
+  playerToken,
+  thresholds,
+  onClose,
+}: RoomScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -32,8 +57,56 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
   const [capturedImages, setCapturedImages] = useState<CapturedImage[]>([]);
   const capturedImagesRef = useRef<CapturedImage[]>([]);
   const [scanComplete, setScanComplete] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedCount, setUploadedCount] = useState(0);
+  const [scanGroupId, setScanGroupId] = useState<string | null>(null);
+  const uploadInProgressRef = useRef(false);
+  const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
+  const [scanGroups, setScanGroups] = useState<ScanGroup[]>([]);
+  const [isLoadingScans, setIsLoadingScans] = useState(true);
 
   useEffect(() => {
+    if (scanTarget) return;
+
+    let cancelled = false;
+
+    async function loadScanGroups() {
+      setIsLoadingScans(true);
+
+      try {
+        const response = await sessionClient.getScanGroups(
+          sessionCode,
+          playerId,
+          playerToken,
+        );
+
+        if (!cancelled) {
+          setScanGroups(response.groups);
+          setError(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("UNABLE TO LOAD CALIBRATION PROGRESS.");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingScans(false);
+        }
+      }
+    }
+
+    void loadScanGroups();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionCode, playerId, playerToken, scanTarget]);
+
+  useEffect(() => {
+    if (!scanTarget) {
+      return;
+    }
+    
     let cancelled = false;
     let stream: MediaStream | null = null;
 
@@ -105,7 +178,7 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, []);
+  }, [scanTarget]);
 
   useEffect(() => {
     capturedImagesRef.current = capturedImages;
@@ -132,6 +205,15 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
       }
     };
   }, [previewUrl]);
+
+  function selectThreshold(threshold: ThresholdZone) {
+    setScanTarget({
+      thresholdId: threshold.id,
+      label: threshold.zoneName,
+    });
+
+    setError(null);
+  }
 
   function capture() {
     if (capturedImages.length >= MAX_SCAN_IMAGES) {
@@ -214,20 +296,221 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
     setError(null);
   }
 
+  async function finishScan() {
+    if (
+      !scanTarget ||
+      capturedImages.length === 0 ||
+      uploadInProgressRef.current ||
+      scanComplete
+    ) {
+      return;
+    }
+
+    uploadInProgressRef.current = true;
+    setIsUploading(true);
+    setError(null);
+
+    let groupId = scanGroupId;
+
+    try {
+      if (!groupId) {
+        const response = await sessionClient.createScanGroup(
+          sessionCode,
+          playerId,
+          playerToken,
+          scanTarget.thresholdId,
+          scanTarget.label,
+        );
+
+        groupId = response.group.id;
+        setScanGroupId(groupId);
+      }
+
+      for (let index = uploadedCount; index < capturedImages.length; index++) {
+        await sessionClient.uploadScanImage(
+          sessionCode,
+          groupId,
+          playerId,
+          playerToken,
+          capturedImages[index].blob,
+        );
+
+        setUploadedCount(index + 1);
+      }
+
+      const finalized = await sessionClient.finalizeScanGroup(
+        sessionCode,
+        groupId,
+        playerId,
+        playerToken,
+      );
+
+      if (finalized.group.status !== "uploaded") {
+        throw new Error("Scan finalization was not confirmed");
+      }
+
+      setScanComplete(true);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `UPLOAD FAILED: ${caught.message}. RETRY TO CONTINUE.`
+          : "UPLOAD FAILED. RETRY TO CONTINUE.",
+      );
+    } finally {
+      uploadInProgressRef.current = false;
+      setIsUploading(false);
+    }
+  }
+
+
+  if (!scanTarget) {
+    return (
+      <section
+        className="scanner-viewport"
+        aria-label="Select calibration environment"
+      >
+        <header className="scanner-hud-header">
+          <div>
+            <span className="scanner-hud-brand">
+              THRESHOLD // LENS
+            </span>
+            <span className="scanner-hud-subtitle">
+              ENVIRONMENT CALIBRATION
+            </span>
+          </div>
+          <span className="scanner-camera-status">
+            SELECT ENVIRONMENT
+          </span>
+        </header>
+
+        <div className="scanner-hud-bottom">
+          <div className="scanner-hud-message">
+            <span className="scanner-hud-label">
+              [ ARCHITECT TRANSMISSION ]
+            </span>
+            <p>
+              Select a Threshold to calibrate. Capture the surrounding
+              environment from multiple angles, including connected rooms.
+            </p>
+          </div>
+
+          {error && (
+            <p className="scanner-hud-error" role="alert">
+              [ ERROR ] {error}
+            </p>
+          )}
+
+          <div className="scanner-hud-actions">
+            {thresholds.map((threshold) => {
+              const scanned = scanGroups.some(
+                (group) =>
+                  group.thresholdId === threshold.id &&
+                  ["uploaded", "analyzing", "completed"].includes(group.status),
+              );
+
+              return (
+                <button
+                  key={threshold.id}
+                  type="button"
+                  className="scanner-hud-secondary"
+                  onClick={() => selectThreshold(threshold)}
+                  disabled={isLoadingScans || scanned}
+                >
+                  {threshold.zoneName} //{" "}
+                  {isLoadingScans
+                    ? "CHECKING..."
+                    : scanned
+                      ? "SCANNED ✓"
+                      : "AWAITING SCAN"}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="scanner-hud-label">
+            {scanGroups.filter(
+              (group) =>
+                thresholds.some(
+                  (threshold) => threshold.id === group.thresholdId,
+                ) &&
+                ["uploaded", "analyzing", "completed"].includes(group.status),
+            ).filter(
+              (group, index, groups) =>
+                groups.findIndex(
+                  (other) => other.thresholdId === group.thresholdId,
+                ) === index,
+            ).length}
+            /{thresholds.length} THRESHOLDS CALIBRATED
+          </p>
+
+          <button
+            type="button"
+            className="scanner-hud-primary"
+            onClick={onClose}
+          >
+            RETURN TO EXPEDITION
+          </button>
+
+          <div className="scanner-hud-footer">
+            <span>SECTOR 01 // CALIBRATION</span>
+            <span>{thresholds.length} THRESHOLDS CONNECTED</span>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
       className="scanner-viewport"
       aria-label="Threshold environment scanner"
     >
-      <button
-        type="button"
-        className="scanner-exit-button"
-        onClick={onClose}
-        aria-label="Exit environment scanner"
-      >
-        <span aria-hidden="true">←</span>
-        EXIT SCANNER
-      </button>
+      <div className="scanner-navigation">
+        <button
+          type="button"
+          className="scanner-exit-button"
+          onClick={onClose}
+          aria-label="Exit environment scanner"
+          disabled={isUploading}
+        >
+          <span aria-hidden="true">←</span>
+          EXIT SCANNER
+        </button>
+
+        <button
+          type="button"
+          className="scanner-exit-button"
+          onClick={() => {
+            if (!scanComplete && (capturedImages.length > 0 || previewUrl)) {
+              setError(
+                "FINISH THE CURRENT SCAN BEFORE CHANGING AREAS.",
+              );
+              return;
+            }
+
+            if (scanComplete) {
+              capturedImages.forEach((captured) => {
+                URL.revokeObjectURL(captured.url);
+              });
+
+              setCapturedImages([]);
+              capturedImagesRef.current = [];
+              setImage(null);
+              setPreviewUrl(null);
+              setScanComplete(false);
+            }
+
+            setCameraStatus("initializing");
+            setScanGroupId(null);
+            setUploadedCount(0);
+            setScanTarget(null);
+            setError(null);
+          }}
+          disabled={isUploading}
+        >
+         {scanComplete ? "SCAN ANOTHER THRESHOLD" : "CHANGE THRESHOLD"}
+        </button>
+      </div>
       <video
         ref={videoRef}
         className="scanner-live-video"
@@ -254,7 +537,7 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
             THRESHOLD // LENS
           </span>
           <span className="scanner-hud-subtitle">
-            ENVIRONMENT RECONNAISSANCE
+            {scanTarget.label} // RECONNAISSANCE
           </span>
         </div>
 
@@ -345,9 +628,18 @@ export function RoomScanner({ onClose }: RoomScannerProps) {
               <button
                 type="button"
                 className="scanner-hud-secondary"
-                onClick={() => setScanComplete(true)}
+                onClick={() => void finishScan()}
+                disabled={isUploading}
               >
-                FINISH SCAN
+                {isUploading
+                  ? uploadedCount === capturedImages.length
+                    ? "FINALIZING SCAN..."
+                    : `UPLOADING ${uploadedCount}/${capturedImages.length}...`
+                  : uploadedCount === capturedImages.length
+                    ? "RETRY FINALIZATION"
+                    : uploadedCount > 0
+                      ? "RETRY UPLOAD"
+                      : "FINISH SCAN"}
               </button>
             )}
           </div>

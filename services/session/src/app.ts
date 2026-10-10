@@ -13,9 +13,22 @@ import {
   savePlayerCredential,
   getPlayerCredentialHash,
   deletePlayerCredential,
+  createScanGroup,
+  getScanGroup,
+  listScanGroups,
+  createScanImage,
+  countScanImages,
+  listScanImages,
+  finalizeScanGroup,
 } from "./sessionStore.js";
 import cors from "cors";
 import express from "express";
+import multer from "multer";
+import {
+  detectImageType,
+  saveImage,
+  removeImage,
+} from "./imageStorage.js";
 
 type SessionStatus = "awaiting_players" | "ready";
 
@@ -61,6 +74,19 @@ export const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "32kb" }));
+
+const MAX_SCAN_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_SCAN_IMAGES = 6;
+
+const scanImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_SCAN_IMAGE_SIZE,
+    files: 1,
+    fields: 0,
+    parts: 1,
+  },
+}).single("image");
 
 function generateSessionCode(): string {
   const characters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -159,6 +185,25 @@ function verifyPlayerToken(
 
 function getSession(code: string): Session | undefined {
   return sessions.get(code.toUpperCase());
+}
+
+function authenticateExpeditionPlayer(
+  session: Session,
+  playerId: unknown,
+  token: unknown
+): boolean {
+  if (typeof playerId !== "string") {
+    return false;
+  }
+
+  const belongsToExpedition = session.players.some(
+    (player) => player.id === playerId
+  );
+
+  return (
+    belongsToExpedition &&
+    verifyPlayerToken(playerId, token)
+  );
 }
 
 function updateSessionStatus(session: Session): void {
@@ -464,6 +509,27 @@ app.post("/sessions/:code/advance", (request, response) => {
     return;
   }
 
+  if (session.phase === "calibrating") {
+    const scanGroups = listScanGroups(session.code);
+
+    const allThresholdsScanned =
+      session.thresholds.length > 0 &&
+      session.thresholds.every((threshold) =>
+        scanGroups.some(
+          (group) =>
+            group.thresholdId === threshold.id &&
+            ["uploaded", "analyzing", "completed"].includes(group.status),
+        ),
+      );
+
+    if (!allThresholdsScanned) {
+      response.status(409).json({
+        error: "calibration_incomplete",
+      });
+      return;
+    }
+  }
+
   const nextPhase = PHASE_TRANSITIONS[session.phase];
 
   if (!nextPhase) {
@@ -735,6 +801,402 @@ app.delete(
       session,
     });
   }
+);
+
+
+app.post(
+  "/sessions/:code/scan-groups/:groupId/finalize",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const { playerId, playerToken } = request.body ?? {};
+
+    if (
+      !authenticateExpeditionPlayer(
+        session,
+        playerId,
+        playerToken
+      )
+    ) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
+      });
+      return;
+    }
+
+    const group = getScanGroup(request.params.groupId);
+
+    if (!group || group.sessionCode !== session.code) {
+      response.status(404).json({
+        error: "scan_group_not_found",
+      });
+      return;
+    }
+
+    if (group.status === "uploaded") {
+      response.json({ group });
+      return;
+    }
+
+    if (group.status !== "pending") {
+      response.status(409).json({
+        error: "scan_group_not_finalizable",
+      });
+      return;
+    }
+
+    const finalized = finalizeScanGroup(group.id);
+
+    if (!finalized || finalized.status !== "uploaded") {
+      response.status(409).json({
+        error: "scan_group_empty_or_not_finalizable",
+      });
+      return;
+    }
+
+    response.json({ group: finalized });
+  }
+);
+
+//
+// Expedition scan groups
+//
+
+// Create a scan group for a Fire TV zone or an additional area.
+app.post("/sessions/:code/scan-groups", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const { playerId, playerToken, thresholdId, label } =
+    request.body ?? {};
+
+  if (
+    !authenticateExpeditionPlayer(
+      session,
+      playerId,
+      playerToken
+    )
+  ) {
+    response.status(401).json({
+      error: "invalid_player_credentials",
+    });
+    return;
+  }
+
+  if (
+    typeof label !== "string" ||
+    label.trim().length === 0 ||
+    label.trim().length > 100
+  ) {
+    response.status(400).json({
+      error: "invalid_scan_group_label",
+    });
+    return;
+  }
+
+  if (
+    thresholdId !== null &&
+    thresholdId !== undefined &&
+    (typeof thresholdId !== "string" ||
+      !session.thresholds.some(
+        (threshold) => threshold.id === thresholdId
+      ))
+  ) {
+    response.status(400).json({
+      error: "invalid_threshold_id",
+    });
+    return;
+  }
+
+  const group = createScanGroup({
+    id: randomUUID(),
+    sessionCode: session.code,
+    thresholdId: thresholdId ?? null,
+    label: label.trim(),
+    createdBy: playerId,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  });
+
+  response.status(201).json({ group });
+});
+
+// List scan groups belonging to this expedition.
+app.get("/sessions/:code/scan-groups", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const playerId = request.get("X-Player-Id");
+  const token = request.get("Authorization")?.replace(
+    /^Bearer\s+/i,
+    ""
+  );
+
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({
+      error: "invalid_player_credentials",
+    });
+    return;
+  }
+
+  response.json({
+    groups: listScanGroups(session.code),
+  });
+});
+
+// Retrieve a specific scan group within this expedition.
+app.get(
+  "/sessions/:code/scan-groups/:groupId",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const playerId = request.get("X-Player-Id");
+    const token = request.get("Authorization")?.replace(
+      /^Bearer\s+/i,
+      ""
+    );
+
+    if (
+      !authenticateExpeditionPlayer(
+        session,
+        playerId,
+        token
+      )
+    ) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
+      });
+      return;
+    }
+
+    const group = getScanGroup(request.params.groupId);
+
+    if (!group || group.sessionCode !== session.code) {
+      response.status(404).json({
+        error: "scan_group_not_found",
+      });
+      return;
+    }
+
+    response.json({ group });
+  }
+);
+
+
+//
+// Upload a calibration photograph.
+//
+
+app.post(
+  "/sessions/:code/scan-groups/:groupId/images",
+  (request, response, next) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const playerId = request.get("X-Player-Id");
+    const token = request.get("Authorization")?.replace(
+      /^Bearer\s+/i,
+      "",
+    );
+
+    if (!authenticateExpeditionPlayer(session, playerId, token)) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
+      });
+      return;
+    }
+
+    const group = getScanGroup(request.params.groupId);
+
+    if (!group || group.sessionCode !== session.code) {
+      response.status(404).json({
+        error: "scan_group_not_found",
+      });
+      return;
+    }
+
+    if (group.status !== "pending") {
+      response.status(409).json({
+        error: "scan_group_not_pending",
+      });
+      return;
+    }
+
+    if (countScanImages(group.id) >= MAX_SCAN_IMAGES) {
+      response.status(409).json({
+        error: "scan_image_limit_reached",
+        limit: MAX_SCAN_IMAGES,
+      });
+      return;
+    }
+
+    scanImageUpload(request, response, (error: unknown) => {
+      if (error) {
+        if (
+          error instanceof multer.MulterError &&
+          error.code === "LIMIT_FILE_SIZE"
+        ) {
+          response.status(413).json({
+            error: "image_too_large",
+          });
+          return;
+        }
+
+        response.status(400).json({
+          error: "invalid_image_upload",
+        });
+        return;
+      }
+
+      next();
+    });
+  },
+  async (request, response) => {
+    const session = getSession(request.params.code);
+    const group = getScanGroup(request.params.groupId);
+
+    if (
+      !session ||
+      !group ||
+      group.sessionCode !== session.code
+    ) {
+      response.status(404).json({
+        error: "scan_group_not_found",
+      });
+      return;
+    }
+
+    const file = request.file;
+
+    if (!file || file.buffer.length === 0) {
+      response.status(400).json({
+        error: "image_required",
+      });
+      return;
+    }
+
+    const mimeType = detectImageType(file.buffer);
+
+    if (!mimeType || file.mimetype !== mimeType) {
+      response.status(415).json({
+        error: "unsupported_image_format",
+      });
+      return;
+    }
+
+    if (countScanImages(group.id) >= MAX_SCAN_IMAGES) {
+      response.status(409).json({
+        error: "scan_image_limit_reached",
+        limit: MAX_SCAN_IMAGES,
+      });
+      return;
+    }
+
+    let storageKey: string | null = null;
+
+    try {
+      storageKey = await saveImage(
+        file.buffer,
+        session.code,
+        group.id,
+        mimeType,
+      );
+
+      const image = createScanImage({
+        id: randomUUID(),
+        scanGroupId: group.id,
+        storageKey,
+        mimeType,
+        sizeBytes: file.buffer.length,
+        createdAt: new Date().toISOString(),
+      });
+
+      response.status(201).json({
+        image: {
+          id: image.id,
+          scanGroupId: image.scanGroupId,
+          mimeType: image.mimeType,
+          sizeBytes: image.sizeBytes,
+          createdAt: image.createdAt,
+        },
+        count: countScanImages(group.id),
+        limit: MAX_SCAN_IMAGES,
+      });
+    } catch (error) {
+      if (storageKey) {
+        await removeImage(storageKey).catch(() => {});
+      }
+
+      if (
+        error instanceof Error &&
+        error.message === "scan_image_limit_reached"
+      ) {
+        response.status(409).json({
+          error: "scan_image_limit_reached",
+          limit: MAX_SCAN_IMAGES,
+        });
+        return;
+      }
+
+      if (
+        error instanceof Error &&
+        error.message === "scan_group_not_pending"
+      ) {
+        response.status(409).json({
+          error: "scan_group_not_pending",
+        });
+        return;
+      }
+
+      if (
+        error instanceof Error &&
+        error.message === "scan_group_not_found"
+      ) {
+        response.status(404).json({
+          error: "scan_group_not_found",
+        });
+        return;
+      }
+
+      console.error("Scan image upload failed:", error);
+
+      response.status(500).json({
+        error: "image_upload_failed",
+      });
+    }
+  },
 );
 
 export function resetSessionsForTesting(): void {
