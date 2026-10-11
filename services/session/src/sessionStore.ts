@@ -56,6 +56,43 @@ database.exec(`
 `);
 
 database.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_scan_groups_unique_threshold
+  ON scan_groups(session_code, threshold_id)
+  WHERE threshold_id IS NOT NULL;
+`);
+
+// Add claim fields to databases created before scan ownership existed.
+const scanGroupColumns = database
+  .prepare("PRAGMA table_info(scan_groups)")
+  .all() as unknown as Array<{ name: string }>;
+
+const existingColumns = new Set(
+  scanGroupColumns.map((column) => column.name),
+);
+
+if (!existingColumns.has("claimed_by")) {
+  database.exec(`
+    ALTER TABLE scan_groups
+    ADD COLUMN claimed_by TEXT;
+  `);
+
+  // Preserve ownership of existing pending scans.
+  database.exec(`
+    UPDATE scan_groups
+    SET claimed_by = created_by
+    WHERE claimed_by IS NULL
+      AND status = 'pending';
+  `);
+}
+
+if (!existingColumns.has("claim_expires_at")) {
+  database.exec(`
+    ALTER TABLE scan_groups
+    ADD COLUMN claim_expires_at TEXT;
+  `);
+}
+
+database.exec(`
   CREATE TABLE IF NOT EXISTS scan_images (
     id TEXT PRIMARY KEY,
     scan_group_id TEXT NOT NULL,
@@ -89,6 +126,8 @@ export interface ScanGroup {
   thresholdId: string | null;
   label: string;
   createdBy: string;
+  claimedBy: string | null;
+  claimExpiresAt: string | null;
   status: ScanGroupStatus;
   createdAt: string;
 }
@@ -125,7 +164,10 @@ function toScanImage(row: ScanImageRow): ScanImage {
 const MAX_IMAGES_PER_SCAN_GROUP = 6;
 
 
-export function createScanImage(image: ScanImage): ScanImage {
+export function createScanImage(
+  image: ScanImage,
+  playerId: string,
+): ScanImage {
   const result = database
     .prepare(`
       INSERT INTO scan_images (
@@ -142,6 +184,11 @@ export function createScanImage(image: ScanImage): ScanImage {
         FROM scan_groups
         WHERE id = ?
           AND status = 'pending'
+          AND claimed_by = ?
+          AND (
+            claim_expires_at IS NULL
+            OR claim_expires_at > ?
+          )
       )
       AND (
         SELECT COUNT(*)
@@ -157,6 +204,8 @@ export function createScanImage(image: ScanImage): ScanImage {
       image.sizeBytes,
       image.createdAt,
       image.scanGroupId,
+      playerId,
+      new Date().toISOString(),
       image.scanGroupId,
       MAX_IMAGES_PER_SCAN_GROUP,
     );
@@ -170,6 +219,19 @@ export function createScanImage(image: ScanImage): ScanImage {
 
     if (group.status !== "pending") {
       throw new Error("scan_group_not_pending");
+    }
+
+    if (
+      playerId !== undefined &&
+      (
+        group.claimedBy !== playerId ||
+        (
+          group.claimExpiresAt !== null &&
+          group.claimExpiresAt <= new Date().toISOString()
+        )
+      )
+    ) {
+      throw new Error("scan_claim_not_owned");
     }
 
     throw new Error("scan_image_limit_reached");
@@ -297,6 +359,8 @@ interface ScanGroupRow {
   threshold_id: string | null;
   label: string;
   created_by: string;
+  claimed_by: string | null;
+  claim_expires_at: string | null;
   status: ScanGroupStatus;
   created_at: string;
 }
@@ -308,6 +372,8 @@ function toScanGroup(row: ScanGroupRow): ScanGroup {
     thresholdId: row.threshold_id,
     label: row.label,
     createdBy: row.created_by,
+    claimedBy: row.claimed_by,
+    claimExpiresAt: row.claim_expires_at,
     status: row.status,
     createdAt: row.created_at,
   };
@@ -322,10 +388,12 @@ export function createScanGroup(group: ScanGroup): ScanGroup {
         threshold_id,
         label,
         created_by,
+        claimed_by,
+        claim_expires_at,
         status,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       group.id,
@@ -333,12 +401,59 @@ export function createScanGroup(group: ScanGroup): ScanGroup {
       group.thresholdId,
       group.label,
       group.createdBy,
+      group.claimedBy ?? group.createdBy,
+      group.claimExpiresAt ?? null,
       group.status,
-      group.createdAt
+      group.createdAt,
     );
 
-  return group;
+  return getScanGroup(group.id)!;
 }
+
+
+export function claimScanGroup(
+  id: string,
+  playerId: string,
+  durationMinutes = 10,
+): ScanGroup | null {
+  const expiresAt = new Date(
+    Date.now() + durationMinutes * 60_000,
+  ).toISOString();
+
+  const now = new Date().toISOString();
+
+  const result = database
+    .prepare(`
+      UPDATE scan_groups
+      SET
+        claimed_by = ?,
+        claim_expires_at = ?
+      WHERE id = ?
+        AND status = 'pending'
+        AND (
+          claimed_by IS NULL
+          OR claimed_by = ?
+          OR (
+            claim_expires_at IS NOT NULL
+            AND claim_expires_at <= ?
+          )
+        )
+    `)
+    .run(
+      playerId,
+      expiresAt,
+      id,
+      playerId,
+      now,
+    );
+
+  if (result.changes === 0) {
+    return null;
+  }
+
+  return getScanGroup(id);
+}
+
 
 export function getScanGroup(
   id: string
@@ -369,8 +484,60 @@ export function listScanGroups(
   return rows.map(toScanGroup);
 }
 
+export function deleteSessionScanGroups(
+  sessionCode: string,
+): number {
+  const result = database
+    .prepare(`
+      DELETE FROM scan_groups
+      WHERE session_code = ?
+    `)
+    .run(sessionCode);
+
+  return Number(result.changes);
+}
+
+export function resetSessionScanGroupsForReuse(
+  sessionCode: string,
+): number {
+  database.exec("BEGIN IMMEDIATE");
+
+  try {
+    database
+      .prepare(`
+        DELETE FROM scan_groups
+        WHERE session_code = ?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM scan_images
+            WHERE scan_images.scan_group_id = scan_groups.id
+          )
+      `)
+      .run(sessionCode);
+
+    const result = database
+      .prepare(`
+        UPDATE scan_groups
+        SET
+          status = 'uploaded',
+          claimed_by = NULL,
+          claim_expires_at = NULL
+        WHERE session_code = ?
+      `)
+      .run(sessionCode);
+
+    database.exec("COMMIT");
+
+    return Number(result.changes);
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function finalizeScanGroup(
-  id: string
+  id: string,
+  playerId: string,
 ): ScanGroup | null {
   database
     .prepare(`
@@ -378,13 +545,23 @@ export function finalizeScanGroup(
       SET status = 'uploaded'
       WHERE id = ?
         AND status = 'pending'
+        AND claimed_by = ?
+        AND (
+          claim_expires_at IS NULL
+          OR claim_expires_at > ?
+        )
         AND EXISTS (
           SELECT 1
           FROM scan_images
           WHERE scan_group_id = ?
         )
     `)
-    .run(id, id);
+    .run(
+      id,
+      playerId,
+      new Date().toISOString(),
+      id,
+    );
 
   return getScanGroup(id);
 }

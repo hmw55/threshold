@@ -46,8 +46,19 @@ describe("Scan group persistence", () => {
 
     createScanGroup(group);
 
-    expect(getScanGroup(group.id)).toEqual(group);
-    expect(listScanGroups(session.code)).toEqual([group]);
+    expect(getScanGroup(group.id)).toEqual({
+      ...group,
+      claimedBy: group.createdBy,
+      claimExpiresAt: null,
+    });
+
+    expect(listScanGroups(session.code)).toEqual([
+      {
+        ...group,
+        claimedBy: group.createdBy,
+        claimExpiresAt: null,
+      },
+    ]);
   });
 
   it("associates scan groups with Fire TV zones", async () => {
@@ -121,7 +132,11 @@ describe("Scan group persistence", () => {
       .delete(`/sessions/${session.code}/thresholds/tv-1`)
       .expect(200);
 
-    expect(getScanGroup(group.id)).toEqual(group);
+    expect(getScanGroup(group.id)).toEqual({
+      ...group,
+      claimedBy: group.createdBy,
+      claimExpiresAt: null,
+    });
   });
 
   it("deletes scan groups when the expedition closes", async () => {

@@ -1,5 +1,4 @@
-
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { app, resetSessionsForTesting } from "../src/app.js";
 import {
@@ -17,6 +16,10 @@ describe("Calibration photograph uploads", () => {
 
   beforeEach(() => {
     resetSessionsForTesting();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   async function setup() {
@@ -344,6 +347,126 @@ describe("Calibration photograph uploads", () => {
       const saved = await readImage(imagesAfter[0]!.storageKey);
       expect(saved.equals(JPEG)).toBe(true);
     } finally {
+      for (const image of listScanImages(context.groupId)) {
+        await removeImage(image.storageKey);
+      }
+    }
+  });
+
+
+  it("preserves photographs when another player recovers an expired claim", async () => {
+    const context = await setup();
+
+    try {
+      // Player A uploads the first photograph.
+      await upload(context).expect(201);
+
+      const originalImages = listScanImages(context.groupId);
+      expect(originalImages).toHaveLength(1);
+
+      const originalKey = originalImages[0]!.storageKey;
+
+      // Player B joins the same expedition.
+      const joined = await request(app)
+        .post(`/sessions/${context.code}/join`)
+        .send({ name: "Player B" })
+        .expect(201);
+
+      const secondPlayer = {
+        playerId: joined.body.player.id as string,
+        playerToken: joined.body.playerToken as string,
+      };
+
+      // Simulate the expiration of Player A's claim.
+      const group = getScanGroup(context.groupId);
+      expect(group?.claimExpiresAt).not.toBeNull();
+
+      vi.setSystemTime(
+        new Date(
+          new Date(group!.claimExpiresAt!).getTime() + 1000,
+        ),
+      );
+
+      // Player B recovers the abandoned scan.
+      const recovered = await request(app)
+        .post(
+          `/sessions/${context.code}/scan-groups/${context.groupId}/claim`,
+        )
+        .send(secondPlayer)
+        .expect(200);
+
+      expect(recovered.body.group.claimedBy).toBe(
+        secondPlayer.playerId,
+      );
+
+      // The original photograph is still stored.
+      const preservedImages = listScanImages(context.groupId);
+
+      expect(preservedImages).toHaveLength(1);
+      expect(preservedImages[0]!.storageKey).toBe(originalKey);
+
+      const preservedBytes = await readImage(originalKey);
+      expect(preservedBytes.equals(JPEG)).toBe(true);
+
+      // Player A can no longer upload.
+      const rejectedUpload = await upload(context).expect(403);
+
+      expect(rejectedUpload.body.error).toBe(
+        "scan_claimed_by_another_player",
+      );
+
+      // Player A can no longer finalize.
+      const rejectedFinalize = await request(app)
+        .post(
+          `/sessions/${context.code}/scan-groups/${context.groupId}/finalize`,
+        )
+        .send({
+          playerId: context.playerId,
+          playerToken: context.playerToken,
+        })
+        .expect(403);
+
+      expect(rejectedFinalize.body.error).toBe(
+        "scan_claimed_by_another_player",
+      );
+
+      // Player B uploads another photograph.
+      const secondUpload = await request(app)
+        .post(
+          `/sessions/${context.code}/scan-groups/${context.groupId}/images`,
+        )
+        .set("X-Player-Id", secondPlayer.playerId)
+        .set(
+          "Authorization",
+          `Bearer ${secondPlayer.playerToken}`,
+        )
+        .attach("image", JPEG, {
+          filename: "second-environment.jpg",
+          contentType: "image/jpeg",
+        })
+        .expect(201);
+
+      expect(secondUpload.body.count).toBe(2);
+      expect(listScanImages(context.groupId)).toHaveLength(2);
+
+      // Player B finalizes the recovered scan.
+      const finalized = await request(app)
+        .post(
+          `/sessions/${context.code}/scan-groups/${context.groupId}/finalize`,
+        )
+        .send(secondPlayer)
+        .expect(200);
+
+      expect(finalized.body.group.status).toBe("uploaded");
+      expect(finalized.body.group.claimedBy).toBe(
+        secondPlayer.playerId,
+      );
+
+      expect(listScanImages(context.groupId)).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+
+      // Clean up both photographs, even if an assertion fails.
       for (const image of listScanImages(context.groupId)) {
         await removeImage(image.storageKey);
       }

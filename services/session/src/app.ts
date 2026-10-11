@@ -20,6 +20,9 @@ import {
   countScanImages,
   listScanImages,
   finalizeScanGroup,
+  claimScanGroup,
+  deleteSessionScanGroups,
+  resetSessionScanGroupsForReuse,
 } from "./sessionStore.js";
 import cors from "cors";
 import express from "express";
@@ -69,6 +72,15 @@ const ZONE_NAMES = [
 ] as const;
 
 const sessions = loadSessions<Session>();
+
+export function resetSessionsForTesting(): void {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("resetSessionsForTesting is only available in tests");
+  }
+
+  sessions.clear();
+  clearSessions();
+}
 
 export const app = express();
 
@@ -596,16 +608,7 @@ app.post("/sessions/:code/back", (request, response) => {
 });
 
 
-
-/**
- * Restart an Expedition without disconnecting anyone.
- *
- * Preserves the Expedition code, registered Fire TVs,
- * connected operatives, and assigned Threshold zones.
- *
- * Only a registered Fire TV can restart an Expedition.
- */
-app.post("/sessions/:code/restart", (request, response) => {
+app.post("/sessions/:code/restart", async (request, response) => {
   const session = getSession(request.params.code);
 
   if (!session) {
@@ -635,7 +638,15 @@ app.post("/sessions/:code/restart", (request, response) => {
     return;
   }
 
-  // Restarting is allowed from any phase except the lobby.
+  const mode = request.body?.mode;
+
+  if (mode !== "reuse" && mode !== "rescan") {
+    response.status(400).json({
+      error: "invalid_restart_mode",
+    });
+    return;
+  }
+
   if (session.phase === "lobby") {
     response.status(409).json({
       error: "expedition_already_in_lobby",
@@ -643,18 +654,47 @@ app.post("/sessions/:code/restart", (request, response) => {
     return;
   }
 
-  // Preserve players, devices, and the expedition code.
+  if (mode === "rescan") {
+    // Collect file keys before deleting the database records.
+    const groups = listScanGroups(session.code);
+
+    const storageKeys = groups.flatMap((group) =>
+      listScanImages(group.id).map((image) => image.storageKey),
+    );
+
+    try {
+      // Delete the physical photographs first.
+      // removeImage() tolerates files that are already missing.
+      for (const storageKey of storageKeys) {
+        await removeImage(storageKey);
+      }
+    } catch (error) {
+      console.error("Failed to clean up calibration photographs", error);
+
+      response.status(500).json({
+        error: "scan_cleanup_failed",
+      });
+      return;
+    }
+
+    // Cascades deletion to scan_images records.
+    deleteSessionScanGroups(session.code);
+  } else {
+    // Keep existing photographs for the next expedition.
+    resetSessionScanGroupsForReuse(session.code);
+  }
+
+  // Preserve players, registered TVs, and the expedition code.
   session.phase = "lobby";
   updateSessionStatus(session);
-
   saveSession(session.code, session);
 
-  response.json({
+  response.status(200).json({
     session,
     restarted: true,
+    mode,
   });
 });
-
 
 // Existing Lens player joining endpoint.
 app.post("/sessions/:code/join", (request, response) => {
@@ -840,6 +880,13 @@ app.post(
       return;
     }
 
+    if (group.claimedBy !== playerId) {
+      response.status(403).json({
+        error: "scan_claimed_by_another_player",
+      });
+      return;
+    }
+
     if (group.status === "uploaded") {
       response.json({ group });
       return;
@@ -852,7 +899,7 @@ app.post(
       return;
     }
 
-    const finalized = finalizeScanGroup(group.id);
+    const finalized = finalizeScanGroup(group.id, playerId);
 
     if (!finalized || finalized.status !== "uploaded") {
       response.status(409).json({
@@ -864,6 +911,66 @@ app.post(
     response.json({ group: finalized });
   }
 );
+
+
+app.post(
+  "/sessions/:code/scan-groups/:groupId/claim",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({
+        error: "session_not_found",
+      });
+      return;
+    }
+
+    const { playerId, playerToken } = request.body ?? {};
+
+    if (
+      !authenticateExpeditionPlayer(
+        session,
+        playerId,
+        playerToken,
+      )
+    ) {
+      response.status(401).json({
+        error: "invalid_player_credentials",
+      });
+      return;
+    }
+
+    const group = getScanGroup(request.params.groupId);
+
+    if (!group || group.sessionCode !== session.code) {
+      response.status(404).json({
+        error: "scan_group_not_found",
+      });
+      return;
+    }
+
+    if (group.status !== "pending") {
+      response.status(409).json({
+        error: "scan_group_not_claimable",
+      });
+      return;
+    }
+
+    const claimed = claimScanGroup(group.id, playerId);
+
+    if (!claimed) {
+      response.status(409).json({
+        error: "scan_group_already_claimed",
+      });
+      return;
+    }
+
+    response.status(200).json({
+      group: claimed,
+    });
+  },
+);
+
 
 //
 // Expedition scan groups
@@ -908,12 +1015,10 @@ app.post("/sessions/:code/scan-groups", (request, response) => {
   }
 
   if (
-    thresholdId !== null &&
-    thresholdId !== undefined &&
-    (typeof thresholdId !== "string" ||
-      !session.thresholds.some(
-        (threshold) => threshold.id === thresholdId
-      ))
+    typeof thresholdId !== "string" ||
+    !session.thresholds.some(
+      (threshold) => threshold.id === thresholdId
+    )
   ) {
     response.status(400).json({
       error: "invalid_threshold_id",
@@ -927,6 +1032,10 @@ app.post("/sessions/:code/scan-groups", (request, response) => {
     thresholdId: thresholdId ?? null,
     label: label.trim(),
     createdBy: playerId,
+    claimedBy: playerId,
+    claimExpiresAt: new Date(
+      Date.now() + 10 * 60 * 1000,
+    ).toISOString(),
     status: "pending",
     createdAt: new Date().toISOString(),
   });
@@ -1047,6 +1156,17 @@ app.post(
       return;
     }
 
+    if (
+      group.claimedBy !== playerId ||
+      (group.claimExpiresAt !== null &&
+        group.claimExpiresAt <= new Date().toISOString())
+    ) {
+      response.status(403).json({
+        error: "scan_claimed_by_another_player",
+      });
+      return;
+    }
+
     if (group.status !== "pending") {
       response.status(409).json({
         error: "scan_group_not_pending",
@@ -1124,6 +1244,15 @@ app.post(
       return;
     }
 
+    const playerId = request.get("X-Player-Id");
+
+    if (!playerId) {
+      response.status(401).json({
+        error: "missing_player_id",
+      });
+      return;
+    }
+
     let storageKey: string | null = null;
 
     try {
@@ -1134,14 +1263,17 @@ app.post(
         mimeType,
       );
 
-      const image = createScanImage({
-        id: randomUUID(),
-        scanGroupId: group.id,
-        storageKey,
-        mimeType,
-        sizeBytes: file.buffer.length,
-        createdAt: new Date().toISOString(),
-      });
+      const image = createScanImage(
+        {
+          id: randomUUID(),
+          scanGroupId: group.id,
+          storageKey,
+          mimeType,
+          sizeBytes: file.buffer.length,
+          createdAt: new Date().toISOString(),
+        },
+        playerId,
+      );
 
       response.status(201).json({
         image: {
@@ -1157,6 +1289,16 @@ app.post(
     } catch (error) {
       if (storageKey) {
         await removeImage(storageKey).catch(() => {});
+      }
+
+      if (
+        error instanceof Error &&
+        error.message === "scan_claim_not_owned"
+      ) {
+        response.status(403).json({
+          error: "scan_claim_not_owned",
+        });
+        return;
       }
 
       if (
@@ -1198,12 +1340,3 @@ app.post(
     }
   },
 );
-
-export function resetSessionsForTesting(): void {
-  if (process.env.NODE_ENV !== "test") {
-    throw new Error("Session reset is only available in test mode");
-  }
-
-  sessions.clear();
-  clearSessions();
-}
