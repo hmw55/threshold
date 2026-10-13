@@ -32,7 +32,9 @@ async function request<T>(
     ...options,
     headers: {
       Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.body && !(options.body instanceof FormData)
+        ? { "Content-Type": "application/json" }
+        : {}),
       ...options.headers,
     },
   });
@@ -59,7 +61,109 @@ function normalizeCode(code: string): string {
   return normalized;
 }
 
+export interface ScanGroup {
+  id: string;
+  sessionCode: string;
+  thresholdId: string | null;
+  label: string;
+  createdBy: string;
+  status: "pending" | "uploaded" | "analyzing" | "completed" | "failed";
+  createdAt: string;
+}
+
+export interface ScanImageUploadResult {
+  image: {
+    id: string;
+    scanGroupId: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: string;
+  };
+  count: number;
+  limit: number;
+}
+
 export const sessionClient = {
+  createScanGroup(
+    code: string,
+    playerId: string,
+    playerToken: string,
+    thresholdId: string | null,
+    label: string,
+  ): Promise<{ group: ScanGroup }> {
+    return request<{ group: ScanGroup }>(
+      `/sessions/${normalizeCode(code)}/scan-groups`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          playerId,
+          playerToken,
+          thresholdId,
+          label,
+        }),
+      },
+    );
+  },
+
+  getScanGroups(
+    code: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<{ groups: ScanGroup[] }> {
+    return request<{ groups: ScanGroup[] }>(
+      `/sessions/${normalizeCode(code)}/scan-groups`,
+      {
+        method: "GET",
+        headers: {
+          "X-Player-Id": playerId,
+          Authorization: `Bearer ${playerToken}`,
+        },
+      },
+    );
+  },
+  
+  finalizeScanGroup(
+    code: string,
+    groupId: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<{ group: ScanGroup }> {
+    return request<{ group: ScanGroup }>(
+      `/sessions/${normalizeCode(code)}/scan-groups/${encodeURIComponent(groupId)}/finalize`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          playerId,
+          playerToken,
+        }),
+      },
+    );
+  },
+
+  uploadScanImage(
+    code: string,
+    groupId: string,
+    playerId: string,
+    playerToken: string,
+    image: Blob,
+  ): Promise<ScanImageUploadResult> {
+    const formData = new FormData();
+
+    formData.append("image", image, "environment.jpg");
+
+    return request<ScanImageUploadResult>(
+      `/sessions/${normalizeCode(code)}/scan-groups/${encodeURIComponent(groupId)}/images`,
+      {
+        method: "POST",
+        headers: {
+          "X-Player-Id": playerId,
+          Authorization: `Bearer ${playerToken}`,
+        },
+        body: formData,
+      },
+    );
+  },
+
   createConnection(
     code: string,
     name: string,
@@ -76,12 +180,13 @@ export const sessionClient = {
   reconnect(
     code: string,
     playerId: string,
+    playerToken: string,
   ): Promise<PlayerConnection> {
     return request<PlayerConnection>(
       `/sessions/${normalizeCode(code)}/reconnect`,
       {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({ playerId, playerToken }),
       },
     );
   },
@@ -92,11 +197,19 @@ export const sessionClient = {
     );
   },
 
-  async leave(code: string, playerId: string): Promise<void> {
+
+  async leave(
+    code: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<void> {
     await request<{ session: ExpeditionSession }>(
       `/sessions/${normalizeCode(code)}/players/${encodeURIComponent(playerId)}`,
       {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${playerToken}`,
+        },
       },
     );
   },

@@ -14,6 +14,7 @@ import com.thresholdtv.session.ConnectedThreshold
 import com.thresholdtv.ui.ThresholdTheme
 import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
+import com.thresholdtv.ui.screens.CalibrationScreen
 import com.thresholdtv.ui.screens.LobbyScreen
 
 class MainActivity : Activity() {
@@ -21,12 +22,16 @@ class MainActivity : Activity() {
     private lateinit var home: HomeScreen
     private lateinit var join: JoinExpeditionScreen
     private lateinit var lobby: LobbyScreen
+    private lateinit var calibration: CalibrationScreen
     private lateinit var sessions: SessionController
 
     private var state: ThresholdState = ThresholdState.Idle
     private var showingJoin = false
     private var connecting = false
     private var leaving = false
+    private var advancing = false
+    private var returningToLobby = false
+    private var restarting = false
 
     private var sessionCode: String? = null
     private var connectedThresholds: List<ConnectedThreshold> = emptyList()
@@ -58,6 +63,12 @@ class MainActivity : Activity() {
         lobby = LobbyScreen(
             context = this,
             onLeave = ::leaveExpedition,
+            onContinue = ::advance
+        )
+
+        calibration = CalibrationScreen(
+            context = this,
+            onBack = ::returnToLobby,
             onContinue = ::advance
         )
 
@@ -122,6 +133,10 @@ class MainActivity : Activity() {
         if (state == ThresholdState.AwaitingPlayers) {
             showLobby()
         }
+
+        if (!advancing && !returningToLobby && !restarting) {
+            applySessionPhase(session)
+        }
     }
 
     private fun onSessionError(message: String) {
@@ -181,46 +196,138 @@ class MainActivity : Activity() {
         return super.onKeyDown(keyCode, event)
     }
 
+
     private fun advance() {
-        state = when (val current = state) {
-            ThresholdState.Idle -> return
+        if (advancing || restarting || returningToLobby || leaving || connecting) return
 
-            ThresholdState.AwaitingPlayers ->
-                ThresholdState.Calibrating
+        val currentCode = sessionCode ?: return
 
-            ThresholdState.Calibrating ->
-                ThresholdState.ExpeditionReady(
-                    expeditionId = sessionCode.orEmpty(),
-                    sectorCount = 1,
-                    playerCount = playerNames.size
-                )
+        if (state == ThresholdState.Idle) return
 
-            is ThresholdState.ExpeditionReady ->
-                ThresholdState.Playing(current.expeditionId)
-
-            is ThresholdState.Playing ->
-                ThresholdState.Results(current.expeditionId)
-
-            is ThresholdState.Results -> {
-                reset()
-                showHome()
-                return
-            }
+        if (state is ThresholdState.Results) {
+            restartExpedition()
+            return
         }
 
-        lobby.stop()
-        sessions.stop()
-        renderState()
+        advancing = true
+
+        sessions.advance(
+            onSuccess = { session ->
+                advancing = false
+
+                if (sessionCode != currentCode) return@advance
+
+                applySessionPhase(session)
+            },
+            onFailure = { message ->
+                advancing = false
+
+                android.widget.Toast.makeText(
+                    this,
+                    message,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+
+    private fun returnToLobby() {
+        if (returningToLobby || advancing || leaving || connecting) return
+        if (state != ThresholdState.Calibrating) return
+
+        val currentCode = sessionCode ?: return
+
+        returningToLobby = true
+
+        sessions.back(
+            onSuccess = { session ->
+                returningToLobby = false
+
+                if (sessionCode != currentCode) return@back
+
+                applySessionPhase(session)
+            },
+            onFailure = { message ->
+                returningToLobby = false
+
+                android.widget.Toast.makeText(
+                    this,
+                    message,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+
+    private fun restartExpedition() {
+        if (restarting || advancing || returningToLobby || leaving || connecting) return
+        if (state !is ThresholdState.Results) return
+
+        val currentCode = sessionCode ?: return
+
+        restarting = true
+
+        sessions.restart(
+            onSuccess = { session ->
+                restarting = false
+
+                if (sessionCode != currentCode) return@restart
+
+                applySessionPhase(session)
+            },
+            onFailure = { message ->
+                restarting = false
+
+                android.widget.Toast.makeText(
+                    this,
+                    message,
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+    private fun applySessionPhase(session: ExpeditionSession) {
+        val nextState = when (session.phase) {
+            "lobby" -> ThresholdState.AwaitingPlayers
+
+            "calibrating" -> ThresholdState.Calibrating
+
+            "ready" -> ThresholdState.ExpeditionReady(
+                expeditionId = session.code,
+                sectorCount = 1,
+                playerCount = session.playerNames.size
+            )
+
+            "playing" -> ThresholdState.Playing(session.code)
+
+            "results" -> ThresholdState.Results(session.code)
+
+            else -> return
+        }
+
+        if (state == nextState) return
+
+        calibration.stop()
+
+        state = nextState
+
+        if (nextState == ThresholdState.AwaitingPlayers) {
+            showLobby()
+        } else {
+            lobby.stop()
+            renderState()
+        }
     }
 
     private fun renderState() {
         when (val current = state) {
-            ThresholdState.Calibrating ->
-                showState(
-                    "CALIBRATING",
-                    "Observe your environment.",
-                    "PRESS SELECT WHEN COMPLETE"
-                )
+            ThresholdState.Calibrating -> {
+                setContentView(calibration)
+                calibration.start()
+            }
 
             is ThresholdState.ExpeditionReady ->
                 showState(
@@ -242,7 +349,7 @@ class MainActivity : Activity() {
                 showState(
                     "EXPEDITION COMPLETE",
                     "The Architect has recorded your performance.",
-                    "PRESS SELECT TO RETURN"
+                    "PRESS SELECT TO RESTART EXPEDITION"
                 )
 
             else -> Unit
@@ -309,6 +416,7 @@ class MainActivity : Activity() {
     private fun reset() {
         sessions.stop()
         lobby.stop()
+        calibration.stop()
         sessionCode = null
         connectedThresholds = emptyList()
         playerNames = emptyList()
@@ -316,9 +424,13 @@ class MainActivity : Activity() {
         connecting = false
         showingJoin = false
         leaving = false
+        advancing = false
+        returningToLobby = false
+        restarting = false
         lobby.setLeaving(false)
         state = ThresholdState.Idle
     }
+
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
@@ -327,6 +439,10 @@ class MainActivity : Activity() {
 
             state == ThresholdState.AwaitingPlayers -> {
                 leaveExpedition()
+            }
+
+            state == ThresholdState.Calibrating -> {
+                returnToLobby()
             }
 
             else -> super.onBackPressed()
@@ -338,6 +454,7 @@ class MainActivity : Activity() {
         home.deactivate()
         join.deactivate()
         lobby.stop()
+        calibration.stop()
         super.onDestroy()
     }
 }
