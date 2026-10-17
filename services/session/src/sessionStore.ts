@@ -113,6 +113,179 @@ database.exec(`
   ON scan_images(scan_group_id);
 `);
 
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environments (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL
+      CHECK (source IN ('simulated', 'scanned')),
+    created_at TEXT NOT NULL
+  );
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environment_objects (
+    id TEXT PRIMARY KEY,
+    environment_id TEXT NOT NULL,
+    parent_object_id TEXT,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT,
+    location TEXT NOT NULL,
+    recognition_status TEXT NOT NULL
+      CHECK (
+        recognition_status IN (
+          'confirmed',
+          'collection_only',
+          'uncertain'
+        )
+      ),
+    requires_closer_scan INTEGER NOT NULL DEFAULT 0
+      CHECK (requires_closer_scan IN (0, 1)),
+    created_at TEXT NOT NULL,
+
+    FOREIGN KEY (environment_id)
+      REFERENCES environments(id)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (parent_object_id)
+      REFERENCES environment_objects(id)
+      ON DELETE SET NULL
+  );
+`);
+
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_objects_environment
+  ON environment_objects(environment_id);
+`);
+
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_objects_parent
+  ON environment_objects(parent_object_id);
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environment_observations (
+    id TEXT PRIMARY KEY,
+    environment_id TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    session_code TEXT,
+    scan_group_id TEXT,
+    recognition_status TEXT NOT NULL
+      CHECK (
+        recognition_status IN (
+          'confirmed',
+          'collection_only',
+          'uncertain'
+        )
+      ),
+    observed_at TEXT NOT NULL,
+
+    FOREIGN KEY (environment_id)
+      REFERENCES environments(id)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (object_id)
+      REFERENCES environment_objects(id)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (session_code)
+      REFERENCES sessions(code)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (scan_group_id)
+      REFERENCES scan_groups(id)
+      ON DELETE SET NULL
+  );
+`);
+
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_observations_environment
+  ON environment_observations(environment_id);
+`);
+
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_observations_session
+  ON environment_observations(session_code);
+`);
+
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_observations_object
+  ON environment_observations(object_id);
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environment_object_refs (
+    session_code TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    model_ref TEXT NOT NULL,
+
+    PRIMARY KEY (session_code, object_id),
+
+    UNIQUE (session_code, model_ref),
+
+    FOREIGN KEY (session_code)
+      REFERENCES sessions(code)
+      ON DELETE CASCADE,
+
+    FOREIGN KEY (object_id)
+      REFERENCES environment_objects(id)
+      ON DELETE CASCADE
+  );
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environment_ref_counters (
+    session_code TEXT PRIMARY KEY,
+    next_number INTEGER NOT NULL DEFAULT 1
+      CHECK (next_number >= 1),
+
+    FOREIGN KEY (session_code)
+      REFERENCES sessions(code)
+      ON DELETE CASCADE
+  );
+`);
+
+const observationColumns = database
+  .prepare("PRAGMA table_info(environment_observations)")
+  .all() as Array<{ name: string }>;
+
+if (!observationColumns.some((column) => column.name === "observed_description")) {
+  database.exec(`
+    ALTER TABLE environment_observations
+    ADD COLUMN observed_description TEXT
+  `);
+}
+
+if (!observationColumns.some((column) => column.name === "observed_location")) {
+  database.exec(`
+    ALTER TABLE environment_observations
+    ADD COLUMN observed_location TEXT
+  `);
+}
+
+if (
+  !observationColumns.some(
+    (column) => column.name === "observed_name",
+  )
+) {
+  database.exec(`
+    ALTER TABLE environment_observations
+    ADD COLUMN observed_name TEXT;
+  `);
+}
+
+if (
+  !observationColumns.some(
+    (column) => column.name === "observed_category",
+  )
+) {
+  database.exec(`
+    ALTER TABLE environment_observations
+    ADD COLUMN observed_category TEXT;
+  `);
+}
+
 export type ScanGroupStatus =
   | "pending"
   | "uploaded"
@@ -564,4 +737,416 @@ export function finalizeScanGroup(
     );
 
   return getScanGroup(id);
+}
+
+export interface Environment {
+  id: string;
+  name: string;
+  source: "simulated" | "scanned";
+  createdAt: string;
+}
+
+interface EnvironmentRow {
+  id: string;
+  name: string;
+  source: Environment["source"];
+  created_at: string;
+}
+
+export function createEnvironment(
+  environment: Environment,
+): Environment {
+  database
+    .prepare(`
+      INSERT INTO environments (
+        id, name, source, created_at
+      )
+      VALUES (?, ?, ?, ?)
+    `)
+    .run(
+      environment.id,
+      environment.name,
+      environment.source,
+      environment.createdAt,
+    );
+
+  return environment;
+}
+
+export function getEnvironment(
+  id: string,
+): Environment | null {
+  const row = database
+    .prepare(`
+      SELECT *
+      FROM environments
+      WHERE id = ?
+    `)
+    .get(id) as EnvironmentRow | undefined;
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    source: row.source,
+    createdAt: row.created_at,
+  };
+}
+
+export type RecognitionStatus =
+  | "confirmed"
+  | "collection_only"
+  | "uncertain";
+
+export interface EnvironmentObject {
+  id: string;
+  environmentId: string;
+  parentObjectId: string | null;
+  name: string;
+  category: string;
+  description: string | null;
+  location: string;
+  recognitionStatus: RecognitionStatus;
+  requiresCloserScan: boolean;
+  createdAt: string;
+}
+
+interface EnvironmentObjectRow {
+  id: string;
+  environment_id: string;
+  parent_object_id: string | null;
+  name: string;
+  category: string;
+  description: string | null;
+  location: string;
+  recognition_status: RecognitionStatus;
+  requires_closer_scan: number;
+  created_at: string;
+}
+
+function toEnvironmentObject(
+  row: EnvironmentObjectRow,
+): EnvironmentObject {
+  return {
+    id: row.id,
+    environmentId: row.environment_id,
+    parentObjectId: row.parent_object_id,
+    name: row.name,
+    category: row.category,
+    description: row.description,
+    location: row.location,
+    recognitionStatus: row.recognition_status,
+    requiresCloserScan: row.requires_closer_scan === 1,
+    createdAt: row.created_at,
+  };
+}
+
+export function createEnvironmentObject(
+  object: EnvironmentObject,
+): EnvironmentObject {
+  if (object.parentObjectId !== null) {
+    const parent = getEnvironmentObject(object.parentObjectId);
+
+    if (!parent) {
+      throw new Error("environment_parent_not_found");
+    }
+
+    if (parent.environmentId !== object.environmentId) {
+      throw new Error("environment_parent_mismatch");
+    }
+  }
+
+  database
+    .prepare(`
+      INSERT INTO environment_objects (
+        id,
+        environment_id,
+        parent_object_id,
+        name,
+        category,
+        description,
+        location,
+        recognition_status,
+        requires_closer_scan,
+        created_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      object.id,
+      object.environmentId,
+      object.parentObjectId,
+      object.name,
+      object.category,
+      object.description,
+      object.location,
+      object.recognitionStatus,
+      object.requiresCloserScan ? 1 : 0,
+      object.createdAt,
+    );
+
+  return object;
+}
+
+export function getEnvironmentObject(
+  id: string,
+): EnvironmentObject | null {
+  const row = database
+    .prepare(`
+      SELECT *
+      FROM environment_objects
+      WHERE id = ?
+    `)
+    .get(id) as EnvironmentObjectRow | undefined;
+
+  return row ? toEnvironmentObject(row) : null;
+}
+
+export function listEnvironmentObjects(
+  environmentId: string,
+): EnvironmentObject[] {
+  const rows = database
+    .prepare(`
+      SELECT *
+      FROM environment_objects
+      WHERE environment_id = ?
+      ORDER BY category, name, id
+    `)
+    .all(environmentId) as unknown as EnvironmentObjectRow[];
+
+  return rows.map(toEnvironmentObject);
+}
+
+export interface EnvironmentObservation {
+  id: string;
+  environmentId: string;
+  objectId: string;
+  sessionCode: string | null;
+  scanGroupId: string | null;
+  observedName: string | null;
+  observedCategory: string | null;
+  observedDescription: string | null;
+  observedLocation: string | null;
+  recognitionStatus: RecognitionStatus;
+  observedAt: string;
+}
+
+interface EnvironmentObservationRow {
+  id: string;
+  environment_id: string;
+  object_id: string;
+  session_code: string | null;
+  scan_group_id: string | null;
+  observed_name: string | null;
+  observed_category: string | null;
+  observed_description: string | null;
+  observed_location: string | null;
+  recognition_status: RecognitionStatus;
+  observed_at: string;
+}
+
+function toEnvironmentObservation(
+  row: EnvironmentObservationRow,
+): EnvironmentObservation {
+  return {
+    id: row.id,
+    environmentId: row.environment_id,
+    objectId: row.object_id,
+    sessionCode: row.session_code,
+    scanGroupId: row.scan_group_id,
+    observedName: row.observed_name,
+    observedCategory: row.observed_category,
+    observedDescription: row.observed_description,
+    observedLocation: row.observed_location,
+    recognitionStatus: row.recognition_status,
+    observedAt: row.observed_at,
+  };
+}
+
+
+export function createEnvironmentObservation(
+  observation: EnvironmentObservation,
+): EnvironmentObservation {
+  const object = getEnvironmentObject(observation.objectId);
+
+  if (!object) {
+    throw new Error("environment_object_not_found");
+  }
+
+  if (object.environmentId !== observation.environmentId) {
+    throw new Error("environment_observation_mismatch");
+  }
+
+  database
+    .prepare(`
+      INSERT INTO environment_observations (
+        id,
+        environment_id,
+        object_id,
+        session_code,
+        scan_group_id,
+        observed_name,
+        observed_category,
+        recognition_status,
+        observed_at,
+        observed_description,
+        observed_location
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      observation.id,
+      observation.environmentId,
+      observation.objectId,
+      observation.sessionCode,
+      observation.scanGroupId,
+      observation.observedName,
+      observation.observedCategory,
+      observation.recognitionStatus,
+      observation.observedAt,
+      observation.observedDescription,
+      observation.observedLocation,
+    );
+
+  return observation;
+}
+
+
+export function getEnvironmentObservation(
+  id: string,
+): EnvironmentObservation | null {
+  const row = database
+    .prepare(`
+      SELECT *
+      FROM environment_observations
+      WHERE id = ?
+    `)
+    .get(id) as EnvironmentObservationRow | undefined;
+
+  return row ? toEnvironmentObservation(row) : null;
+}
+
+export function listEnvironmentObservations(
+  environmentId: string,
+  sessionCode: string | null = null,
+): EnvironmentObservation[] {
+  const rows = database
+    .prepare(`
+      SELECT *
+      FROM environment_observations
+      WHERE environment_id = ?
+        AND session_code IS ?
+      ORDER BY observed_at ASC, id ASC
+    `)
+    .all(
+      environmentId,
+      sessionCode,
+    ) as unknown as EnvironmentObservationRow[];
+
+  return rows.map(toEnvironmentObservation);
+}
+
+export function backfillBaselineObservationIdentity(
+  environmentId: string,
+  objectId: string,
+  observedName: string,
+  observedCategory: string,
+): void {
+  database
+    .prepare(`
+      UPDATE environment_observations
+      SET
+        observed_name = COALESCE(observed_name, ?),
+        observed_category = COALESCE(observed_category, ?)
+      WHERE environment_id = ?
+        AND object_id = ?
+        AND session_code IS NULL
+        AND id = ?
+    `)
+    .run(
+      observedName,
+      observedCategory,
+      environmentId,
+      objectId,
+      `baseline-${objectId}`,
+    );
+}
+
+export function getOrCreateEnvironmentObjectRef(
+  sessionCode: string,
+  objectId: string,
+): string {
+  // SQLite serializes writes, and this transaction ensures that
+  // reference allocation is atomic.
+  database.exec("BEGIN IMMEDIATE");
+
+  try {
+    const existing = database
+      .prepare(`
+        SELECT model_ref
+        FROM environment_object_refs
+        WHERE session_code = ?
+          AND object_id = ?
+      `)
+      .get(sessionCode, objectId) as
+      | { model_ref: string }
+      | undefined;
+
+    if (existing) {
+      database.exec("COMMIT");
+      return existing.model_ref;
+    }
+
+database
+  .prepare(`
+    INSERT INTO environment_ref_counters (
+      session_code,
+      next_number
+    )
+    SELECT
+      ?,
+      COALESCE(
+        (
+          SELECT MAX(
+            CAST(SUBSTR(model_ref, 10) AS INTEGER)
+          ) + 1
+          FROM environment_object_refs
+          WHERE session_code = ?
+        ),
+        1
+      )
+    WHERE true
+    ON CONFLICT(session_code) DO NOTHING
+  `)
+  .run(sessionCode, sessionCode);
+
+  const next = database
+    .prepare(`
+      UPDATE environment_ref_counters
+      SET next_number = next_number + 1
+      WHERE session_code = ?
+      RETURNING next_number - 1 AS allocated_number
+    `)
+    .get(sessionCode) as { allocated_number: number };
+
+  const modelRef = `observed-${next.allocated_number}`;
+
+    database
+      .prepare(`
+        INSERT INTO environment_object_refs (
+          session_code,
+          object_id,
+          model_ref
+        )
+        VALUES (?, ?, ?)
+      `)
+      .run(sessionCode, objectId, modelRef);
+
+    database.exec("COMMIT");
+    return modelRef;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
 }

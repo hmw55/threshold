@@ -1,4 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import {
+  spawn,
+  execFileSync,
+  type ChildProcess,
+} from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -93,6 +97,32 @@ afterEach(async () => {
     temporaryDirectory = undefined;
   }
 });
+
+function runEnvironmentRefProcess(
+  databasePath: string,
+  operation: "initialize" | "allocate",
+  sessionCode: string,
+  objectId: string,
+): string {
+  const helperEntry = resolve(
+    serviceDirectory,
+    "tests/helpers/environment-ref-process.ts",
+  );
+
+  return execFileSync(
+    process.execPath,
+    [tsxCli, helperEntry, operation, sessionCode, objectId],
+    {
+      cwd: serviceDirectory,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        THRESHOLD_DB_PATH: databasePath,
+      },
+      encoding: "utf8",
+    },
+  ).trim();
+}
 
 describe("Session persistence across backend restarts", () => {
   it("restores an expedition with its players and TVs", async () => {
@@ -191,5 +221,58 @@ describe("Session persistence across backend restarts", () => {
     );
 
     expect(restoredResponse.status).toBe(404);
+  });
+
+  it("preserves Architect object references across separate processes", () => {
+    temporaryDirectory = mkdtempSync(
+      join(tmpdir(), "threshold-ref-restart-"),
+    );
+
+    const databasePath = join(
+      temporaryDirectory,
+      "sessions.sqlite",
+    );
+
+    const sessionCode = "REFRESTART";
+
+    // First process: initialize the environment and session.
+    const firstBookshelfRef = runEnvironmentRefProcess(
+      databasePath,
+      "initialize",
+      sessionCode,
+      "living-room-bookshelf",
+    );
+
+    expect(firstBookshelfRef).toBe("observed-1");
+
+    // Second process: the bookshelf reference must remain stable.
+    const restoredBookshelfRef = runEnvironmentRefProcess(
+      databasePath,
+      "allocate",
+      sessionCode,
+      "living-room-bookshelf",
+    );
+
+    expect(restoredBookshelfRef).toBe(firstBookshelfRef);
+
+    // Third process: allocate a reference for another object.
+    const couchRef = runEnvironmentRefProcess(
+      databasePath,
+      "allocate",
+      sessionCode,
+      "living-room-couch",
+    );
+
+    expect(couchRef).toBe("observed-2");
+
+    // Fourth process: verify the new reference also persists.
+    const restoredCouchRef = runEnvironmentRefProcess(
+      databasePath,
+      "allocate",
+      sessionCode,
+      "living-room-couch",
+    );
+
+    expect(restoredCouchRef).toBe(couchRef);
   });
 });
