@@ -1,3 +1,5 @@
+@import "./components/RoomScanner.css";
+
 .lens {
   position: relative;
   min-height: 100svh;
@@ -48,8 +50,18 @@
 
 .lens-shell {
   width: min(100%, 440px);
-  position: relative;
-  z-index: 1;
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 235, 255, 0.35) transparent;
 }
 
 .system-header,
@@ -262,22 +274,6 @@
   cursor: not-allowed;
 }
 
-.disconnect-button {
-  width: 100%;
-  margin-top: 28px;
-  padding: 14px;
-  border: 1px solid #39414d;
-  background: transparent;
-  color: #9ba6b4;
-  font-size: 11px;
-  letter-spacing: 0.1em;
-}
-
-.disconnect-button:hover {
-  border-color: #ff367f;
-  color: #ff367f;
-}
-
 .connection-error {
   margin: -4px 0 20px;
   font-size: 12px;
@@ -291,60 +287,6 @@
   padding-top: 18px;
   border-top: 1px solid #30343b;
   font-size: 9px;
-}
-
-.connected-panel {
-  --operative-color: #00ebff;
-}
-
-.connected-symbol {
-  margin: 30px 0 16px;
-  text-align: center;
-  font-size: 64px;
-  color: var(--operative-color);
-  text-shadow: 0 0 25px var(--operative-color);
-}
-
-.connected-title {
-  margin: 0 0 30px;
-  text-align: center;
-  font-family: "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
-  font-size: clamp(34px, 9vw, 52px);
-  line-height: 1;
-  letter-spacing: -0.025em;
-}
-
-.operative-card {
-  padding: 22px;
-  border: 1px solid var(--operative-color);
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.operative-name {
-  margin: 12px 0;
-  font-size: clamp(22px, 7vw, 32px);
-  font-weight: 700;
-  color: var(--operative-color);
-  overflow-wrap: anywhere;
-}
-
-.operative-status {
-  color: #aab4c0;
-  font-size: 11px;
-  letter-spacing: 0.07em;
-}
-
-.operative-card .indicator-dot {
-  background: var(--operative-color);
-  box-shadow: 0 0 10px var(--operative-color);
-}
-
-.connected-description {
-  margin: 24px 0 0;
-  color: #a5acb6;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.65;
 }
 
 @keyframes cursor-blink {
@@ -400,5 +342,132 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* =========================================================
+   THRESHOLD LENS — RESPONSIVE VIEWPORT
+   ========================================================= */
+
+.lens {
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+
+  padding:
+    max(12px, var(--safe-top))
+    max(12px, var(--safe-right))
+    max(12px, var(--safe-bottom))
+    max(12px, var(--safe-left));
+
+  overflow: hidden;
+}
+
+.lens-shell {
+  width: min(100%, 440px);
+  max-width: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-panel {
+  min-height: 0;
+  max-height: none;
+  flex-shrink: 0;
+}
+
+/* Compact the connection screens on short displays. */
+@media (max-height: 740px) {
+  .header-rule {
+    margin: 8px 0 12px;
+  }
+
+  .lens-brand {
+    padding: 0 0 12px;
+  }
+
+  .glitch-title {
+    margin: 8px 0;
+    font-size: clamp(48px, 13vh, 80px);
+  }
+
+  .terminal-panel {
+    padding: 16px;
+  }
+
+  .terminal-output {
+    gap: 6px;
+    padding: 10px 0;
+  }
+
+  .connection-form {
+    padding-top: 12px;
+  }
+
+  .connection-form .section-label {
+    margin-bottom: 10px;
+  }
+
+  .connection-form input {
+    height: 44px;
+    margin-bottom: 12px;
+  }
+
+  .connect-button {
+    min-height: 44px;
+  }
+
+  .terminal-footer {
+    margin-top: 12px;
+    padding-top: 10px;
+  }
+}
+
+/* Use horizontal space rather than vertical space
+   when the device is rotated. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .lens {
+    padding:
+      max(8px, var(--safe-top))
+      max(16px, var(--safe-right))
+      max(8px, var(--safe-bottom))
+      max(16px, var(--safe-left));
+  }
+
+  .lens-shell {
+    width: min(100%, 720px);
+  }
+
+  .system-header,
+  .terminal-footer {
+    font-size: 9px;
+  }
+
+  .glitch-title {
+    font-size: clamp(42px, 11vh, 64px);
+  }
+}
+
+/* Reserved for the upcoming full-screen camera UI. */
+
+
+/* Keep visual effects passive so they cannot
+   interfere with camera or gameplay controls. */
+.signal-noise,
+.scanlines {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signal-noise,
+  .scanlines,
+  .glitch-title,
+  .indicator-dot {
+    animation: none;
   }
 }

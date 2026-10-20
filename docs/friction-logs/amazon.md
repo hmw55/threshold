@@ -21,12 +21,105 @@ Experiences are classified as **positive**, **mixed**, or **negative**. General 
 | AF-001 | [Physical Fire TV Development Setup](#af-001--physical-fire-tv-development-setup) | Positive |
 | AF-002 | [Reusing a Fire TV Remote Across Multiple Devices](#af-002--reusing-a-fire-tv-remote-across-multiple-devices) | Mixed |
 | AF-003 | [Fire OS 6 Compatibility and Physical Device Testing](#af-003--fire-os-6-compatibility-and-physical-device-testing) | Positive |
+| AF-004 | [Bedrock Account Verification and Zero Inference Quotas](#af-004--bedrock-account-verification-and-zero-inference-quotas) | Negative |
 
 ---
 
 ## Negative Experiences
 
-No negative Amazon-related experiences have been documented to date.
+### AF-004 — Bedrock Account Verification and Zero Inference Quotas
+
+**Task**
+
+Configure Amazon Bedrock for Threshold and successfully invoke Amazon Nova Micro through the Converse API as the first step toward integrating The Architect, the application's AI game master.
+
+**Experience:** Negative
+
+**Expected Behavior**
+
+After creating an AWS account, configuring IAM Identity Center, authenticating through AWS CLI, and confirming that a foundation model was active and supported on-demand inference, the developer would be able to perform an initial inference request.
+
+If account activation, verification, or service quotas prevented inference, those restrictions would be clearly communicated before attempting the request, along with actionable steps to resolve them.
+
+**Observed Behavior**
+
+On October 9, 2026, AWS CLI authentication succeeded using an IAM Identity Center administrator permission set. Amazon Bedrock successfully returned model information confirming that `amazon.nova-micro-v1:0` was active and supported on-demand inference in `us-east-1`.
+
+However, an initial Converse API request at approximately 4:00 AM MDT returned an `AccessDeniedException`, stating that the AWS account was undergoing verification. The error indicated that verification normally takes less than two hours.
+
+More than six hours later, the same request returned a `ThrottlingException` stating: "Too many tokens per day, please wait before trying again."
+
+Further investigation through AWS Service Quotas revealed that Amazon Nova Micro had zero allocated on-demand requests per minute, tokens per minute, and model invocation tokens per day. Cross-region inference quotas were also zero.
+
+The AWS Account console displayed no apparent activation requirements, and its Customer Verification page stated: "You are not required to complete customer verification of your account at this time."
+
+The developer also discovered AWS User Notifications verification emails in Gmail's Spam folder. These concerned notification delivery channels rather than Bedrock inference access and did not provide a resolution.
+
+AWS Support's automated assistant investigated account verification, incomplete account activation, and payment verification but could not provide a recommendation. A support case was subsequently created on October 9, 2026, at 10:26 AM MDT.
+
+**Troubleshooting Steps**
+
+1. Configured IAM Identity Center and assigned the `AdministratorAccess` permission set.
+2. Installed AWS CLI v2 and authenticated using an SSO profile.
+3. Verified authentication using `aws sts get-caller-identity`.
+4. Listed available Amazon Bedrock foundation models.
+5. Confirmed that Amazon Nova Micro was active and supported on-demand inference.
+6. Attempted a Converse API request and received an account-verification error.
+7. Retried more than six hours later and received a daily-token throttling error.
+8. Queried AWS Service Quotas and identified zero allocated inference capacity for Nova Micro.
+9. Reviewed AWS Account information and Customer Verification status.
+10. Reviewed AWS User Notifications verification emails.
+11. Opened AWS Support Center and submitted the issue to its automated troubleshooting assistant.
+12. Received no actionable recommendation from the assistant.
+13. Created an AWS Support case under Account Management / Account Verification.
+
+**Development Impact**
+
+The issue prevented Threshold from performing its first successful Amazon Bedrock inference request, blocking validation of The Architect's planned cloud AI integration.
+
+The developer spent additional time investigating account activation, model availability, service quotas, email verification, and AWS Support instead of implementing application functionality.
+
+Because Threshold is being developed for the Amazon Devices Global Hackathon, the unresolved restriction also introduces uncertainty into a time-constrained development schedule.
+
+Local development can continue through mock AI responses, but actual Bedrock behavior, latency, and integration cannot yet be validated.
+
+**What Worked Well**
+
+- IAM Identity Center authentication and AWS CLI integration worked successfully.
+- Amazon Bedrock model discovery returned useful model metadata.
+- The initial API error identified account verification as a possible restriction and provided an escalation contact.
+- AWS Service Quotas exposed the account's zero inference allowances.
+- AWS Support Center allowed a Basic Support customer to create an account-related support case without upgrading to a paid plan.
+- The support case preserved the developer's error messages and troubleshooting findings.
+
+**Areas of Friction**
+
+- Successful authentication and model discovery created the impression that the account was ready for inference, despite zero usable inference quotas.
+- The verification restriction was not clearly surfaced during account setup or model discovery.
+- The initial error suggested a verification delay of less than two hours, but inference remained unavailable more than six hours later.
+- Subsequent requests produced a different error describing daily token exhaustion, even though no successful inference had occurred.
+- Zero inference quotas were visible in Service Quotas, but the console did not provide a clear explanation of why they were zero or how to enable them.
+- The Customer Verification page indicated that no verification was required, which did not clarify the earlier account-verification error.
+- The automated support workflow investigated several possible causes but could not identify a resolution.
+- The developer had to escalate through a support case before completing a basic first-model invocation.
+
+**Suggested Improvement**
+
+Provide a clear Amazon Bedrock inference-readiness indicator during onboarding that identifies account activation status, verification restrictions, and effective model inference quotas.
+
+When inference is unavailable because of account-level restrictions, return consistent, actionable errors that distinguish verification delays from token consumption or throttling.
+
+If quotas are temporarily zero, explain the reason, expected availability, and whether developer action is required.
+
+Additionally, surface these restrictions in the Bedrock console before developers attempt their first API request, and provide a direct support escalation path for newly created accounts that remain blocked beyond the advertised verification period.
+
+**Resolution Status**
+
+Pending.
+
+AWS Support case created October 9, 2026, at 10:26 AM MDT.
+
+No successful Amazon Bedrock inference request has been completed. The cause of the zero quotas and the relationship to account verification remain unconfirmed pending AWS Support's response.
 
 
 ---

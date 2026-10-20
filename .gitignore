@@ -34,3 +34,12 @@ pnpm-debug.log*
 
 # Local Fire TV device names and ADB addresses
 scripts/fire-tv-devices.local.json
+
+# Local development data (SQLite, scans, cached AI responses)
+.local/
+
+# Local photos for testing
+/test-assets/environments/
+
+# Accidental SQLite development database
+**/:memory:

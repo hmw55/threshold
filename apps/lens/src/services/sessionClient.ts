@@ -1,74 +1,36 @@
+
 import type {
   ExpeditionSession,
   PlayerConnection,
 } from "../types/session";
 
-const SESSION_SERVICE_URL = import.meta.env.VITE_SESSION_SERVICE_URL;
+import {
+  normalizeCode,
+  request,
+} from "./apiClient";
 
-if (!SESSION_SERVICE_URL) {
-  throw new Error("VITE_SESSION_SERVICE_URL is not configured.");
-}
+import { environmentClient } from "./environmentClient";
+import { gameClient } from "./gameClient";
 
-const BASE_URL = SESSION_SERVICE_URL.replace(/\/+$/, "");
+export { SessionClientError } from "./apiClient";
 
-export class SessionClientError extends Error {
-  readonly statusCode: number;
-  readonly errorCode: string;
+export type {
+  ScanGroup,
+  ScanImageUploadResult,
+} from "./environmentClient";
 
-  constructor(statusCode: number, errorCode: string) {
-    super(`Session request failed: ${errorCode} (${statusCode})`);
-
-    this.name = "SessionClientError";
-    this.statusCode = statusCode;
-    this.errorCode = errorCode;
-  }
-}
-
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...options.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-
-    throw new SessionClientError(
-      response.status,
-      typeof body.error === "string" ? body.error : "http_error",
-    );
-  }
-
-  return (await response.json()) as T;
-}
-
-function normalizeCode(code: string): string {
-  const normalized = code.trim().toUpperCase();
-
-  if (!/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/.test(normalized)) {
-    throw new Error("Invalid Expedition access code.");
-  }
-
-  return normalized;
-}
-
-export const sessionClient = {
+const sessionMethods = {
   createConnection(
     code: string,
     name: string,
   ): Promise<PlayerConnection> {
-    return request<PlayerConnection>(
+    return request(
       `/sessions/${normalizeCode(code)}/join`,
       {
         method: "POST",
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+        }),
       },
     );
   },
@@ -76,30 +38,49 @@ export const sessionClient = {
   reconnect(
     code: string,
     playerId: string,
+    playerToken: string,
   ): Promise<PlayerConnection> {
-    return request<PlayerConnection>(
+    return request(
       `/sessions/${normalizeCode(code)}/reconnect`,
       {
         method: "POST",
-        body: JSON.stringify({ playerId }),
+        body: JSON.stringify({
+          playerId,
+          playerToken,
+        }),
       },
     );
   },
 
-  getSession(code: string): Promise<ExpeditionSession> {
-    return request<ExpeditionSession>(
+  getSession(
+    code: string,
+  ): Promise<ExpeditionSession> {
+    return request(
       `/sessions/${normalizeCode(code)}`,
     );
   },
 
-  async leave(code: string, playerId: string): Promise<void> {
+  async leave(
+    code: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<void> {
     await request<{ session: ExpeditionSession }>(
       `/sessions/${normalizeCode(code)}/players/${encodeURIComponent(playerId)}`,
       {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${playerToken}`,
+        },
       },
     );
   },
+};
+
+export const sessionClient = {
+  ...sessionMethods,
+  ...environmentClient,
+  ...gameClient,
 };
 
 export const joinExpedition = sessionClient.createConnection;

@@ -1,0 +1,139 @@
+
+/* =========================================================
+   THRESHOLD LENS — CONNECTED SCREEN
+   ========================================================= */
+
+.connected-panel {
+  --operative-color: #00ebff;
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+.connected-symbol {
+  margin: clamp(6px, 2.5dvh, 30px) 0
+          clamp(6px, 1.5dvh, 16px);
+
+  text-align: center;
+  font-size: clamp(36px, 6dvh, 64px);
+  line-height: 1;
+  color: var(--operative-color);
+  text-shadow: 0 0 25px var(--operative-color);
+}
+
+.connected-title {
+  margin: 0 0 clamp(10px, 2.5dvh, 30px);
+  text-align: center;
+  font-family: "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+  font-size: clamp(30px, 7vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.025em;
+}
+
+.operative-card {
+  padding: clamp(10px, 2dvh, 22px);
+  border: 1px solid var(--operative-color);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.operative-name {
+  margin: clamp(6px, 1.2dvh, 12px) 0;
+  font-size: clamp(22px, 7vw, 32px);
+  font-weight: 700;
+  color: var(--operative-color);
+  overflow-wrap: anywhere;
+}
+
+.operative-status {
+  color: #aab4c0;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+}
+
+.operative-card .indicator-dot {
+  background: var(--operative-color);
+  box-shadow: 0 0 10px var(--operative-color);
+}
+
+.connected-description {
+  margin: clamp(8px, 2dvh, 24px) 0 0;
+  color: #a5acb6;
+  font-family: system-ui, sans-serif;
+  font-size: clamp(11px, 1.6dvh, 14px);
+  line-height: 1.45;
+}
+
+.disconnect-button,
+.scanner-reopen-button {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 14px;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.disconnect-button {
+  margin-top: clamp(8px, 2dvh, 28px);
+  border: 1px solid #39414d;
+  background: transparent;
+  color: #9ba6b4;
+}
+
+.disconnect-button:hover {
+  border-color: #ff367f;
+  color: #ff367f;
+}
+
+/* Calibration scanner re-entry */
+
+.scanner-reopen-button {
+  flex-shrink: 0;
+  margin: clamp(6px, 1dvh, 12px) 0 0;
+  border: 1px solid #00ebff;
+  background: rgba(0, 235, 255, 0.06);
+  color: #00ebff;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+
+.scanner-reopen-button:hover,
+.scanner-reopen-button:focus-visible {
+  background: rgba(0, 235, 255, 0.13);
+  box-shadow: 0 0 18px rgba(0, 235, 255, 0.15);
+  outline: none;
+}
+
+.scanner-reopen-button:active {
+  background: rgba(0, 235, 255, 0.22);
+}
+
+/* Additional compression for shorter displays */
+
+@media (max-height: 740px) {
+  .connected-symbol {
+    margin: 6px 0;
+    font-size: clamp(30px, 5dvh, 42px);
+  }
+
+  .connected-title {
+    margin-bottom: 10px;
+  }
+
+  .operative-card {
+    padding: 10px;
+  }
+
+  .connected-description {
+    margin-top: 8px;
+  }
+
+  .disconnect-button {
+    margin-top: 10px;
+  }
+}

@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { Player } from "../types/session";
+import "./ConnectedScreen.css";
 
 const PLAYER_COLORS = ["#00ebff", "#ff367f", "#c8a4ff", "#ffc46b", "#66e6b0", "#73acff"];
 
