@@ -1,6 +1,8 @@
+import * as crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { GameState } from "./game/gameState.js";
 
 const isTest = process.env.NODE_ENV === "test";
 const configuredDatabasePath = process.env.THRESHOLD_DB_PATH;
@@ -24,6 +26,16 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     code TEXT PRIMARY KEY,
     data TEXT NOT NULL
+  );
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS game_states (
+    session_code TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    FOREIGN KEY (session_code)
+      REFERENCES sessions(code)
+      ON DELETE CASCADE
   );
 `);
 
@@ -708,6 +720,37 @@ export function resetSessionScanGroupsForReuse(
   }
 }
 
+
+/**
+ * Atomically transition a scan group between analysis states.
+ * Returns null if the group is missing or its status changed.
+ */
+export function transitionScanGroupStatus(
+  id: string,
+  expectedStatus: ScanGroupStatus,
+  nextStatus: ScanGroupStatus,
+): ScanGroup | null {
+  const allowed: Record<ScanGroupStatus, ScanGroupStatus[]> = {
+    pending: ["uploaded"],
+    uploaded: ["analyzing"],
+    analyzing: ["completed", "failed"],
+    completed: [],
+    failed: ["analyzing"],
+  };
+
+  if (!allowed[expectedStatus].includes(nextStatus)) {
+    throw new Error("invalid_scan_status_transition");
+  }
+
+  const result = database
+    .prepare(
+      "UPDATE scan_groups SET status = ? WHERE id = ? AND status = ?",
+    )
+    .run(nextStatus, id, expectedStatus);
+
+  return result.changes === 1 ? getScanGroup(id) : null;
+}
+
 export function finalizeScanGroup(
   id: string,
   playerId: string,
@@ -793,6 +836,28 @@ export function getEnvironment(
     createdAt: row.created_at,
   };
 }
+
+// A separate decision ledger preserves AI observations and existing SQLite CHECK constraints.
+database.exec(`
+  CREATE TABLE IF NOT EXISTS environment_object_decisions (
+    id TEXT PRIMARY KEY,
+    environment_id TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    session_code TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('correct', 'reject')),
+    original_name TEXT NOT NULL,
+    corrected_name TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (environment_id) REFERENCES environments(id) ON DELETE CASCADE,
+    FOREIGN KEY (object_id) REFERENCES environment_objects(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_code) REFERENCES sessions(code) ON DELETE CASCADE
+  );
+`);
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_environment_object_decisions_lookup
+  ON environment_object_decisions(session_code, object_id, created_at, id);
+`);
 
 export type RecognitionStatus =
   | "confirmed"
@@ -901,6 +966,130 @@ export function getEnvironmentObject(
     .get(id) as EnvironmentObjectRow | undefined;
 
   return row ? toEnvironmentObject(row) : null;
+}
+
+export function isEnvironmentObjectRejected(objectId: string, sessionCode: string): boolean {
+  const row = database.prepare(`
+    SELECT action FROM environment_object_decisions
+    WHERE object_id = ? AND session_code = ?
+    ORDER BY created_at DESC, rowid DESC LIMIT 1
+  `).get(objectId, sessionCode) as { action: string } | undefined;
+  return row?.action === "reject";
+}
+
+export type ReviewedEnvironmentObject = Omit<EnvironmentObject, "recognitionStatus"> & {
+  recognitionStatus: RecognitionStatus | "rejected";
+};
+
+export function listEnvironmentObjectsForSession(environmentId: string, sessionCode: string):
+  ReviewedEnvironmentObject[] {
+  return listEnvironmentObjects(environmentId).map((object) =>
+    isEnvironmentObjectRejected(object.id, sessionCode)
+      ? { ...object, recognitionStatus: "rejected" as const }
+      : object,
+  );
+}
+
+export function reviewEnvironmentObject(
+  objectId: string,
+  environmentId: string,
+  sessionCode: string,
+  playerId: string,
+  action: "correct" | "reject",
+  correctedName: string | null,
+): ReviewedEnvironmentObject | null {
+  const original = getEnvironmentObject(objectId);
+  if (!original || original.environmentId !== environmentId) return null;
+  if (isEnvironmentObjectRejected(objectId, sessionCode)) {
+    throw new Error("object_already_rejected");
+  }
+  database.exec("SAVEPOINT review_environment_object");
+  try {
+    if (action === "correct") {
+      if (!correctedName) throw new Error("invalid_object_name");
+      database.prepare(`
+        UPDATE environment_objects SET name = ?, recognition_status = 'confirmed',
+          requires_closer_scan = 0 WHERE id = ? AND environment_id = ?
+      `).run(correctedName, objectId, environmentId);
+      createEnvironmentObservation({
+        id: crypto.randomUUID(), environmentId, objectId, sessionCode,
+        scanGroupId: null, observedName: correctedName,
+        observedCategory: original.category,
+        observedDescription: null, observedLocation: original.location,
+        recognitionStatus: "confirmed", observedAt: new Date().toISOString(),
+      });
+    }
+    database.prepare(`
+      INSERT INTO environment_object_decisions
+        (id, environment_id, object_id, session_code, player_id, action,
+         original_name, corrected_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(crypto.randomUUID(), environmentId, objectId, sessionCode, playerId,
+      action, original.name, correctedName, new Date().toISOString());
+    database.exec("RELEASE SAVEPOINT review_environment_object");
+    const updated = getEnvironmentObject(objectId)!;
+    return action === "reject" ? { ...updated, recognitionStatus: "rejected" } : updated;
+  } catch (error) {
+    database.exec("ROLLBACK TO SAVEPOINT review_environment_object");
+    database.exec("RELEASE SAVEPOINT review_environment_object");
+    throw error;
+  }
+}
+
+export function confirmEnvironmentObject(
+  objectId: string,
+  environmentId: string,
+  sessionCode: string,
+  scanGroupId: string | null,
+): EnvironmentObject | null {
+  const object = getEnvironmentObject(objectId);
+
+  if (!object || object.environmentId !== environmentId) {
+    return null;
+  }
+
+  if (isEnvironmentObjectRejected(objectId, sessionCode)) {
+    throw new Error("object_already_rejected");
+  }
+
+  if (object.recognitionStatus === "confirmed") {
+    return object;
+  }
+
+  database.exec("SAVEPOINT confirm_environment_object");
+
+  try {
+    database
+      .prepare(`
+        UPDATE environment_objects
+        SET recognition_status = 'confirmed',
+            requires_closer_scan = 0
+        WHERE id = ? AND environment_id = ?
+      `)
+      .run(objectId, environmentId);
+
+    createEnvironmentObservation({
+      id: crypto.randomUUID(),
+      environmentId,
+      objectId,
+      sessionCode,
+      scanGroupId,
+      observedName: object.name,
+      observedCategory: object.category,
+      observedDescription: object.description,
+      observedLocation: object.location,
+      recognitionStatus: "confirmed",
+      observedAt: new Date().toISOString(),
+    });
+
+    database.exec("RELEASE SAVEPOINT confirm_environment_object");
+
+    return getEnvironmentObject(objectId);
+  } catch (error) {
+    database.exec("ROLLBACK TO SAVEPOINT confirm_environment_object");
+    database.exec("RELEASE SAVEPOINT confirm_environment_object");
+    throw error;
+  }
 }
 
 export function listEnvironmentObjects(
@@ -1149,4 +1338,42 @@ database
     database.exec("ROLLBACK");
     throw error;
   }
+}
+
+
+export function saveGameState(state: GameState): void {
+  database.prepare(`
+    INSERT INTO game_states (session_code, data)
+    VALUES (?, ?)
+    ON CONFLICT(session_code)
+    DO UPDATE SET data = excluded.data
+  `).run(
+    state.sessionCode,
+    JSON.stringify(state),
+  );
+}
+
+export function loadGameState(
+  sessionCode: string,
+): GameState | null {
+  const row = database.prepare(`
+    SELECT data
+    FROM game_states
+    WHERE session_code = ?
+  `).get(sessionCode) as
+    | { data: string }
+    | undefined;
+
+  return row
+    ? JSON.parse(row.data) as GameState
+    : null;
+}
+
+export function deleteGameState(
+  sessionCode: string,
+): void {
+  database.prepare(`
+    DELETE FROM game_states
+    WHERE session_code = ?
+  `).run(sessionCode);
 }

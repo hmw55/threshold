@@ -17,6 +17,15 @@ export interface AiGenerationResponse {
 export interface AiProvider {
   readonly name: AiProviderName;
 
+  analyzeImage?(
+    image: Buffer,
+    prompt: string,
+    options?: {
+      model?: string;
+      systemPrompt?: string;
+    },
+  ): Promise<AiGenerationResponse>;
+
   generate(
     request: AiGenerationRequest,
   ): Promise<AiGenerationResponse>;

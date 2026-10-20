@@ -48,17 +48,14 @@ export function validateArchitectDecision(
     }
   }
 
-  for (const effect of decision.proposedEffects) {
-    if (
-      typeof effect !== "object" ||
-      effect === null ||
-      !["complete_objective", "reveal_clue", "change_world_state"].includes(
-        String(effect.type),
-      ) ||
-      typeof effect.targetId !== "string"
-    ) {
-      throw new Error("Architect proposed an invalid effect");
-    }
+  // The Architect may interpret and narrate player actions,
+  // but cannot directly mutate authoritative game state.
+  // Physical objective completion must be validated by
+  // deterministic server-side gameplay rules.
+  if (decision.proposedEffects.length !== 0) {
+    throw new Error(
+      "Architect proposed unauthorized game-state effects",
+    );
   }
 
   return value as ArchitectDecision;

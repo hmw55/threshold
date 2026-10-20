@@ -10,6 +10,7 @@ import com.thresholdtv.BuildConfig
 class SessionController(
     context: Context,
     private val onUpdate: (ExpeditionSession, String) -> Unit,
+    private val onAdventureUpdate: (String, org.json.JSONObject) -> Unit,
     private val onError: (String) -> Unit
 ) {
     private val client = SessionClient(
@@ -35,9 +36,27 @@ class SessionController(
                 try {
                     val session = client.getExpedition(currentCode)
 
+                    val adventure = if (
+                        session.phase == "playing" ||
+                        session.phase == "results"
+                    ) {
+                        try {
+                            client.getAdventureState(currentCode)
+                        } catch (e: Exception) {
+                            Log.w("Threshold", "Adventure state unavailable", e)
+                            null
+                        }
+                    } else {
+                        null
+                    }
+
                     handler.post {
                         if (active && !leaving && generation == currentGeneration) {
                             onUpdate(session, zone.orEmpty())
+
+                            if (adventure != null) {
+                                onAdventureUpdate(currentCode, adventure)
+                            }
                         }
                     }
                 } catch (e: Exception) {

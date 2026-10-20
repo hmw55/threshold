@@ -15,7 +15,9 @@ import com.thresholdtv.ui.ThresholdTheme
 import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
 import com.thresholdtv.ui.screens.CalibrationScreen
+import com.thresholdtv.ui.screens.ExpeditionScreen
 import com.thresholdtv.ui.screens.LobbyScreen
+import android.view.WindowManager
 
 class MainActivity : Activity() {
 
@@ -23,6 +25,7 @@ class MainActivity : Activity() {
     private lateinit var join: JoinExpeditionScreen
     private lateinit var lobby: LobbyScreen
     private lateinit var calibration: CalibrationScreen
+    private lateinit var expedition: ExpeditionScreen
     private lateinit var sessions: SessionController
 
     private var state: ThresholdState = ThresholdState.Idle
@@ -44,6 +47,7 @@ class MainActivity : Activity() {
         sessions = SessionController(
             context = this,
             onUpdate = ::onSessionUpdate,
+            onAdventureUpdate = ::onAdventureUpdate,
             onError = ::onSessionError
         )
 
@@ -72,7 +76,17 @@ class MainActivity : Activity() {
             onContinue = ::advance
         )
 
+        expedition = ExpeditionScreen(this)
+
         showHome()
+    }
+
+    private fun updateScreenAwake(keepAwake: Boolean) {
+        if (keepAwake) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     private fun createExpedition() {
@@ -139,6 +153,29 @@ class MainActivity : Activity() {
         }
     }
 
+    private var latestAdventure: org.json.JSONObject? = null
+
+    private fun onAdventureUpdate(
+        code: String,
+        adventure: org.json.JSONObject
+    ) {
+        if (sessionCode != code) return
+
+        latestAdventure = adventure
+
+        if (state is ThresholdState.Playing) {
+            expedition.update(adventure)
+        }
+
+        val phase = adventure.optJSONObject("game")
+            ?.optString("phase", "unknown") ?: "unknown"
+
+        android.util.Log.d(
+            "Threshold",
+            "Adventure phase updated: $phase"
+        )
+    }
+
     private fun onSessionError(message: String) {
         connecting = false
 
@@ -184,13 +221,22 @@ class MainActivity : Activity() {
         event: KeyEvent?
     ): Boolean {
         if (
-            state != ThresholdState.Idle &&
-            state != ThresholdState.AwaitingPlayers &&
-            (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                keyCode == KeyEvent.KEYCODE_ENTER)
+            keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            keyCode == KeyEvent.KEYCODE_ENTER
         ) {
-            advance()
-            return true
+            if (state is ThresholdState.Playing) {
+                // Narrative progression is controlled by the game engine,
+                // not by advancing the expedition session lifecycle.
+                return true
+            }
+
+            if (
+                state != ThresholdState.Idle &&
+                state != ThresholdState.AwaitingPlayers
+            ) {
+                advance()
+                return true
+            }
         }
 
         return super.onKeyDown(keyCode, event)
@@ -338,12 +384,16 @@ class MainActivity : Activity() {
                     "PRESS SELECT TO BEGIN EXPEDITION"
                 )
 
-            is ThresholdState.Playing ->
-                showState(
-                    "EXPEDITION ${current.expeditionId}",
-                    "Something in this room\ndoes not belong here.",
-                    "PRESS SELECT TO CONTINUE"
-                )
+            is ThresholdState.Playing -> {
+                setContentView(expedition)
+
+                val adventure = latestAdventure
+                if (adventure != null) {
+                    expedition.update(adventure)
+                } else {
+                    expedition.showWaiting()
+                }
+            }
 
             is ThresholdState.Results ->
                 showState(
@@ -418,6 +468,7 @@ class MainActivity : Activity() {
         lobby.stop()
         calibration.stop()
         sessionCode = null
+        latestAdventure = null
         connectedThresholds = emptyList()
         playerNames = emptyList()
         localZone = ""
