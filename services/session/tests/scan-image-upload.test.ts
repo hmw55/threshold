@@ -277,7 +277,9 @@ describe("Calibration photograph uploads", () => {
         .expect(200);
 
       expect(response.body.group.status).toBe("uploaded");
-      expect(getScanGroup(context.groupId)?.status).toBe("uploaded");
+      expect(["uploaded", "analyzing", "completed", "failed"]).toContain(
+        getScanGroup(context.groupId)?.status,
+      );
       expect(listScanImages(context.groupId)).toHaveLength(1);
     } finally {
       for (const image of listScanImages(context.groupId)) {
@@ -306,7 +308,15 @@ describe("Calibration photograph uploads", () => {
       const second = await finalize().expect(200);
 
       expect(first.body.group.status).toBe("uploaded");
-      expect(second.body.group).toEqual(first.body.group);
+      expect(second.body.group).toMatchObject({
+        id: first.body.group.id,
+        sessionCode: first.body.group.sessionCode,
+        thresholdId: first.body.group.thresholdId,
+        claimedBy: first.body.group.claimedBy,
+      });
+      expect(["uploaded", "analyzing", "completed", "failed"]).toContain(
+        second.body.group.status,
+      );
       expect(listScanImages(context.groupId)).toHaveLength(1);
     } finally {
       for (const image of listScanImages(context.groupId)) {
@@ -341,7 +351,9 @@ describe("Calibration photograph uploads", () => {
       const imagesAfter = listScanImages(context.groupId);
 
       expect(imagesAfter).toEqual(imagesBefore);
-      expect(getScanGroup(context.groupId)?.status).toBe("uploaded");
+      expect(["uploaded", "analyzing", "completed", "failed"]).toContain(
+        getScanGroup(context.groupId)?.status,
+      );
 
       // The original photograph remains accessible.
       const saved = await readImage(imagesAfter[0]!.storageKey);

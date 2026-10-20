@@ -7,6 +7,8 @@ import { InvestigationScreen } from "./components/InvestigationScreen";
 import { ContradictionScreen } from "./components/ContradictionScreen";
 import { RevelationScreen } from "./components/RevelationScreen";
 import { ResolutionScreen } from "./components/ResolutionScreen";
+import { MissionOverlay } from "./components/MissionOverlay";
+import { ArchitectFeed } from "./components/ArchitectFeed";
 import { gameClient, type GamePhase } from "./services/gameClient";
 import "./App.css";
 
@@ -185,6 +187,16 @@ function App() {
               </button>
             )}
           </>
+        )}
+        {isConnected && session.phase === "playing" && session.player && session.playerToken && (
+          <ArchitectFeed sessionCode={session.sessionCode} playerId={session.player.id} playerToken={session.playerToken} />
+        )}
+        {isConnected && session.phase === "playing" && session.player && session.playerToken && (
+          <MissionOverlay
+            sessionCode={session.sessionCode}
+            playerId={session.player.id}
+            playerToken={session.playerToken}
+          />
         )}
         {isConnected && session.phase === "playing" && (
           <button

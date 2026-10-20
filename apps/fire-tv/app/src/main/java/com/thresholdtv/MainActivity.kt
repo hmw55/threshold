@@ -235,10 +235,82 @@ class MainActivity : Activity() {
         lobby.start()
     }
 
+    private var submittingEnding = false
+
+    private fun submitEnding() {
+        if (submittingEnding) return
+        val ending = expedition.selectedDecision() ?: return
+        submittingEnding = true
+        sessions.chooseEnding(
+            ending = ending,
+            onSuccess = { submittingEnding = false },
+            onFailure = { message ->
+                submittingEnding = false
+                android.widget.Toast.makeText(
+                    this, message, android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+    private var submittingTerminal = false
+
+    private fun submitTerminal() {
+        if (submittingTerminal) return
+        val choice = expedition.selectedTerminalChoice() ?: return
+        submittingTerminal = true
+        sessions.submitTerminalDecision(
+            choice = choice,
+            onSuccess = { result ->
+                submittingTerminal = false
+                expedition.terminalResult(
+                    result.optBoolean("correct"),
+                    result.optString("narration")
+                )
+            },
+            onFailure = { message ->
+                submittingTerminal = false
+                expedition.terminalResult(false, message)
+            }
+        )
+    }
+
     override fun onKeyDown(
         keyCode: Int,
         event: KeyEvent?
     ): Boolean {
+        if (state is ThresholdState.Playing && expedition.isChoosingEnding()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    expedition.moveDecision(-1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    expedition.moveDecision(1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    submitEnding()
+                    return true
+                }
+            }
+        }
+        if (state is ThresholdState.Playing && expedition.isChoosingTerminal()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    expedition.moveTerminalSelection(-1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    expedition.moveTerminalSelection(1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    submitTerminal()
+                    return true
+                }
+            }
+        }
         if (
             keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
             keyCode == KeyEvent.KEYCODE_ENTER

@@ -167,6 +167,72 @@ class SessionController(
         }.start()
     }
 
+    fun submitTerminalDecision(
+        choice: Int,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+        val currentGeneration = generation
+        Thread {
+            try {
+                val result = client.submitTerminalDecision(currentCode, choice)
+                handler.post {
+                    if (active && generation == currentGeneration) onSuccess(result)
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Terminal decision failed", e)
+                handler.post {
+                    if (active && generation == currentGeneration) {
+                        onFailure(if (e is SessionException)
+                            "SIGNAL REJECTED: ${e.errorCode}"
+                        else "UNABLE TO CONTACT SESSION SERVICE")
+                    }
+                }
+            }
+        }.start()
+    }
+
+    fun chooseEnding(
+        ending: String,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+        val currentGeneration = generation
+        Thread {
+            try {
+                client.chooseEnding(currentCode, ending)
+                handler.post {
+                    if (active && generation == currentGeneration) onSuccess()
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Final decision failed", e)
+                handler.post {
+                    if (active && generation == currentGeneration) {
+                        onFailure(if (e is SessionException)
+                            "DECISION REJECTED: ${e.errorCode}"
+                        else "UNABLE TO CONTACT SESSION SERVICE")
+                    }
+                }
+            }
+        }.start()
+    }
+
     fun advance(
         onSuccess: (ExpeditionSession) -> Unit,
         onFailure: (String) -> Unit

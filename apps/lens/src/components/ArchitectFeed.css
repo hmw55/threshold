@@ -1,0 +1,6 @@
+.architect-feed { margin:12px 0; border:1px solid #596476; background:#0e141e; color:#e5e9f3; }
+.architect-feed-toggle { width:100%; min-height:48px; padding:12px; display:flex; align-items:center; justify-content:space-between; gap:12px; background:#182130; color:#d6c3ff; border:0; font:inherit; font-size:11px; letter-spacing:1px; cursor:pointer; }
+.architect-feed-log { max-height:38svh; overflow-y:auto; padding:4px 14px 14px; }
+.architect-feed-entry { border-top:1px solid #394455; padding:12px 0 4px; }
+.architect-feed-entry p { font-size:13px; line-height:1.6; margin:8px 0; white-space:pre-wrap; }
+.architect-feed-meta { display:flex; justify-content:space-between; gap:8px; font-size:10px; letter-spacing:1px; color:#a3b6ce; }

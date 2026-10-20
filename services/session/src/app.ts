@@ -581,13 +581,18 @@ app.post("/sessions/:code/advance", (request, response) => {
   if (session.phase === "calibrating") {
     const scanGroups = listScanGroups(session.code);
 
+    // Vision is enrichment, not a dependency for starting the expedition.
+    // An uploaded photograph is real calibration evidence even if local
+    // Ollama is still analyzing it or is unavailable. Never require an AI
+    // process to finish before allowing players to enter the game.
     const allThresholdsScanned =
       session.thresholds.length > 0 &&
       session.thresholds.every((threshold) =>
         scanGroups.some(
           (group) =>
             group.thresholdId === threshold.id &&
-            group.status === "completed",
+            ["uploaded", "analyzing", "completed", "failed"].includes(group.status) &&
+            listScanImages(group.id).length > 0,
         ),
       );
 
@@ -1144,24 +1149,32 @@ app.post("/sessions/:code/game/anchor/answer", async (request, response) => {
   }
 
   if (
-    typeof observation !== "string" ||
-    observation.trim().length < 15 ||
-    observation.length > 2000
+    observation !== undefined && (
+      typeof observation !== "string" ||
+      observation.trim().length < 15 ||
+      observation.length > 2000
+    )
   ) {
     response.status(400).json({ error: "invalid_observation" });
     return;
   }
+
+  const physicalObservation = typeof observation === "string" ? observation.trim() : "";
+  const verifiedAnchor = objectRef === resolved.puzzle.objectRef;
 
   // Evaluate the player's observation before attempting anchor resolution.
   // The Architect proposes an interpretation; it cannot mutate game state.
   let architectDecision;
 
   try {
+    if (!physicalObservation || process.env.THRESHOLD_ARCHITECT_MODE === "offline") {
+      throw new Error("Using offline anchor validation");
+    }
     const architect = new ArchitectDecisionService(
       createAiProvider({
         provider: "ollama",
         ollamaModel: process.env.OLLAMA_MODEL ?? "gemma3:4b",
-        ollamaTimeoutMs: 45_000,
+        ollamaTimeoutMs: 5_000,
       }),
     );
 
@@ -1178,24 +1191,26 @@ app.post("/sessions/:code/game/anchor/answer", async (request, response) => {
           "I am examining the confirmed object " +
           (selectedObject?.name ?? objectRef) +
           " (reference: " + objectRef + "). " +
-          "My field observation: " + observation.trim() +
+          "My field observation: " + physicalObservation +
           ". Evaluate whether this is meaningful physical evidence. " +
           "Do not assume I discovered anything I did not describe.",
       },
     });
   } catch (error) {
-    console.error("Architect investigation failed:", error);
-    response.status(503).json({ error: "architect_unavailable" });
-    return;
+    architectDecision = {
+      outcome: verifiedAnchor ? "accepted" : "rejected",
+      narration: "Local signal analysis is offline. The verified puzzle remains active.",
+      evidenceRequest: null,
+    } as const;
   }
 
   if (
-    architectDecision.outcome !== "accepted"
+    architectDecision.outcome !== "accepted" || !verifiedAnchor
   ) {
     const investigation = {
       playerId,
       objectRef,
-      observation: observation.trim(),
+      observation: physicalObservation,
       createdAt: Date.now(),
       correct: false,
     };
@@ -1227,13 +1242,13 @@ app.post("/sessions/:code/game/anchor/answer", async (request, response) => {
     state,
     resolved.puzzle,
     objectRef,
-    architectDecision.outcome === "accepted",
+    verifiedAnchor && architectDecision.outcome === "accepted",
   );
 
   const investigation = {
     playerId,
     objectRef,
-    observation: observation.trim(),
+    observation: physicalObservation,
     createdAt: Date.now(),
     correct: result.correct,
   };
@@ -1755,6 +1770,22 @@ app.post("/sessions/:code/game/revelation/step", (request, response) => {
     return;
   }
 
+  // Older Lens clients submit the receiver step without an observation.
+  // Accept that existing contract while validating physical descriptions
+  // when a newer client supplies one. Do not block the entire final act.
+  if (interactionId === "locate-receiver") {
+    const observation = request.body?.observation;
+    if (
+      observation !== undefined &&
+      (typeof observation !== "string" ||
+        observation.trim().length < 20 ||
+        observation.length > 500)
+    ) {
+      response.status(400).json({ error: "invalid_receiver_observation" });
+      return;
+    }
+  }
+
   const nextState = completeInteraction(state, interactionId);
   saveGameState(nextState);
 
@@ -1877,6 +1908,101 @@ app.post("/sessions/:code/game/resolution/answer", (request, response) => {
   });
 });
 
+/** Public terminal decision. Registered TVs can commit a shared ending. */
+app.post("/sessions/:code/threshold/resolution/answer", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+  const deviceId = request.header("x-device-id");
+  if (!deviceId || !session.thresholds.some((tv) => tv.deviceId === deviceId)) {
+    response.status(401).json({ error: "invalid_threshold_credentials" });
+    return;
+  }
+  const state = loadGameState(session.code);
+  if (session.phase !== "playing" || !state || state.phase !== "resolution") {
+    response.status(409).json({ error: "resolution_not_ready" });
+    return;
+  }
+  const ending: unknown = request.body?.ending;
+  if (ending !== "preservation" && ending !== "fracture" && ending !== "reconciliation") {
+    response.status(400).json({ error: "invalid_ending" });
+    return;
+  }
+  if (ending === "reconciliation" && !state.discoveredEvidence.includes("missing-testimony")) {
+    response.status(409).json({ error: "missing_testimony_required" });
+    return;
+  }
+  const nextState = advanceGame(state, { type: "choose_ending", ending });
+  saveGameState(nextState);
+  response.json({ game: { phase: nextState.phase, ending: nextState.ending } });
+});
+
+/**
+ * Interactive public-terminal challenges. Every TV must solve its own signal.
+ * The Lens retains the private investigation; the TV contributes independently.
+ * Challenges vary by expedition and never expose their solution to clients.
+ */
+const terminalChallenges = {
+  investigation: [
+    { prompt: "The receiver displays 09:17, but the speaker is silent. Which trace should the team preserve?", choices: ["The timestamped receiver log", "The speaker volume", "A witness's guess"], correct: 0, clue: "A timestamp survives even when sound does not." },
+    { prompt: "Two logs disagree. One is timestamped, one is an unsigned recollection. What can be verified?", choices: ["The unsigned recollection", "The timestamped log", "Neither record"], correct: 1, clue: "Look for evidence that can be checked independently." },
+  ],
+  contradiction: [
+    { prompt: "The recording confirms a signal at 09:17. Which account demands investigation?", choices: ["I heard it at 09:17", "I checked the clock at 09:17", "No signal existed that night"], correct: 2, clue: "A witness denies the event recorded by the archive." },
+    { prompt: "A witness reports silence; a machine records a transmission. What must the team distinguish?", choices: ["Transmission from audible sound", "Two different clocks", "The number of witnesses"], correct: 0, clue: "A transmission need not produce an audible event." },
+  ],
+  revelation: [
+    { prompt: "A signal was transmitted but nobody in the room heard it. Where should the investigation turn?", choices: ["The room's speaker", "An external receiver", "The broken clock"], correct: 1, clue: "The missing witness may never have entered the room." },
+    { prompt: "The archive lists a recipient without a location. What could prove someone received the signal?", choices: ["A louder speaker", "An invented confession", "A receiver acknowledgment"], correct: 2, clue: "Find the receiver, not another person to accuse." },
+  ],
+} as const;
+
+function terminalChallenge(code: string, phase: keyof typeof terminalChallenges) {
+  const variants = terminalChallenges[phase];
+  const seed = [...code].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return variants[seed % variants.length]!;
+}
+
+app.post("/sessions/:code/threshold/game/decision", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const deviceId = request.header("x-device-id");
+  const threshold = session.thresholds.find((tv) => tv.deviceId === deviceId);
+  if (!threshold) { response.status(401).json({ error: "invalid_threshold_credentials" }); return; }
+  const state = loadGameState(session.code);
+  if (session.phase !== "playing" || !state || !(state.phase in terminalChallenges)) {
+    response.status(409).json({ error: "terminal_challenge_unavailable" }); return;
+  }
+  const phase = state.phase as keyof typeof terminalChallenges;
+  const challenge = terminalChallenge(session.code, phase);
+  const index = request.body?.choice;
+  if (!Number.isInteger(index) || index < 0 || index >= challenge.choices.length) {
+    response.status(400).json({ error: "invalid_terminal_choice" }); return;
+  }
+  const marker = `terminal-${phase}-${threshold.id}`;
+  if (state.discoveredEvidence.includes(marker)) {
+    response.status(409).json({ error: "terminal_challenge_completed" }); return;
+  }
+  if (index !== challenge.correct) {
+    response.json({ correct: false, narration: "SIGNAL REJECTED. Reconsider the evidence and try again." });
+    return;
+  }
+  const nextState = {
+    ...state,
+    discoveredEvidence: [...state.discoveredEvidence, marker],
+    tvEvents: [...(state.tvEvents ?? []), {
+      id: randomUUID(),
+      type: "reveal" as const,
+      message: `${threshold.zoneName} // VERIFIED SIGNAL: ${challenge.clue}`,
+      createdAt: Date.now(),
+    }],
+  };
+  saveGameState(nextState);
+  response.json({ correct: true, narration: challenge.clue });
+});
+
 /**
  * Read-only adventure state for a registered Fire TV.
  * Does not expose player credentials or mutate gameplay.
@@ -1916,6 +2042,16 @@ app.get("/sessions/:code/threshold/game", (request, response) => {
   }
 
   response.json({
+    terminalChallenge: (gameState.phase in terminalChallenges) ? (() => {
+      const phase = gameState.phase as keyof typeof terminalChallenges;
+      const challenge = terminalChallenge(session.code, phase);
+      const tv = session.thresholds.find((item) => item.deviceId === deviceId)!;
+      return {
+        prompt: challenge.prompt,
+        choices: challenge.choices,
+        completed: gameState.discoveredEvidence.includes(`terminal-${phase}-${tv.id}`),
+      };
+    })() : null,
     scores: [...(gameState.players ?? [])].sort(
       (a, b) => b.score - a.score,
     ),
@@ -2210,7 +2346,7 @@ app.get("/sessions/:code/game/missions", (request, response) => {
   }
 
   const playerId = request.header("x-player-id");
-  const token = request.header("authorization")?.replace(/^Bearer\\s+/i, "");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
 
   if (!authenticateExpeditionPlayer(session, playerId, token)) {
     response.status(401).json({ error: "invalid_player_credentials" });
@@ -2239,6 +2375,31 @@ app.get("/sessions/:code/game/missions", (request, response) => {
   )?.score ?? 0;
 
   response.json({ missions, score });
+});
+
+/** Shared Architect transmissions visible to authenticated Lens players. */
+app.get("/sessions/:code/game/transmissions", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+  if (session.phase !== "playing" && session.phase !== "results") {
+    response.status(409).json({ error: "game_not_available" });
+    return;
+  }
+  const state = loadGameState(session.code);
+  if (!state) {
+    response.status(404).json({ error: "game_not_initialized" });
+    return;
+  }
+  response.json({ phase: state.phase, events: (state.tvEvents ?? []).slice(-40) });
 });
 
 /**

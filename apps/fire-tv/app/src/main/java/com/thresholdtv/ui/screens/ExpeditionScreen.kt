@@ -18,6 +18,17 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     private val transmission = text(22f, ThresholdTheme.Colors.GlitchCyan)
     private val scoreboard = text(19f, ThresholdTheme.Colors.Primary)
     private val footer = text(16f, ThresholdTheme.Colors.Secondary)
+    private val decision = text(23f, ThresholdTheme.Colors.GlitchCyan)
+    private var terminalPrompt = ""
+    private var terminalChoices: List<String> = emptyList()
+    private var terminalCompleted = false
+    private var terminalSelection = 0
+    private var terminalFeedback = ""
+    private val endings = listOf("preservation", "fracture", "reconciliation")
+    private var selectedEnding = 0
+    private var canReconcile = false
+    private var currentPhase = ""
+
 
     init {
         orientation = VERTICAL
@@ -50,6 +61,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             scroll,
             LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
         )
+        panel.addView(decision)
         panel.addView(footer)
 
         addView(
@@ -76,12 +88,32 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         transmission.text = "ARCHITECT // AWAITING TRANSMISSION"
         scoreboard.text = "SCORES // AWAITING OPERATIVES"
         footer.text = "FOLLOW YOUR LENS"
+        decision.text = ""
+        currentPhase = ""
+        terminalChoices = emptyList()
+        terminalFeedback = ""
     }
 
     fun update(data: JSONObject) {
         val game = data.optJSONObject("game") ?: return
         val adventure = data.optJSONObject("adventure")
         val phase = game.optString("phase", "investigation")
+        if (currentPhase != phase) {
+            terminalSelection = 0
+            terminalFeedback = ""
+        }
+        currentPhase = phase
+        val terminal = data.optJSONObject("terminalChallenge")
+        terminalPrompt = terminal?.optString("prompt") ?: ""
+        terminalCompleted = terminal?.optBoolean("completed", false) ?: false
+        val options = terminal?.optJSONArray("choices")
+        terminalChoices = if (options == null) emptyList() else
+            (0 until options.length()).map { options.optString(it) }
+        val discovered = game.optJSONArray("discoveredEvidence")
+        canReconcile = discovered != null && (0 until discovered.length()).any {
+            discovered.optString(it) == "missing-testimony"
+        }
+
 
         subtitle.text = when (phase) {
             "investigation" -> "ACT I // INVESTIGATION"
@@ -149,10 +181,75 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         }
 
         scoreboard.text = scoreLines.joinToString("\n")
+        renderDecision()
         footer.text = when (phase) {
             "complete" -> "THE ARCHITECT REMEMBERS"
-            "resolution" -> "A CHOICE MUST BE MADE ON YOUR LENS"
-            else -> "CONTINUE THE INVESTIGATION ON YOUR LENS"
+            "resolution" -> "DPAD UP/DOWN TO SELECT // PRESS SELECT TO CONFIRM"
+            else -> if (terminalChoices.isNotEmpty() && !terminalCompleted)
+                "DPAD UP/DOWN TO CHOOSE // SELECT TO TRANSMIT"
+            else "CONTINUE THE INVESTIGATION ON YOUR LENS"
         }
     }
+    private fun renderDecision() {
+        if (currentPhase != "resolution") {
+            decision.text = when {
+                terminalCompleted -> "TERMINAL SIGNAL VERIFIED // LENS INVESTIGATION CONTINUES"
+                terminalChoices.isEmpty() -> ""
+                else -> buildString {
+                    append("TERMINAL CHALLENGE // ").append(terminalPrompt).append("\n")
+                    terminalChoices.forEachIndexed { index, choice ->
+                        append(if (index == terminalSelection) "> " else "  ")
+                        append(choice).append("\n")
+                    }
+                    if (terminalFeedback.isNotEmpty()) append(terminalFeedback)
+                }
+            }
+            return
+        }
+        decision.text = buildString {
+            append("FINAL DECISION // WHAT TRUTH SURVIVES?\n")
+            endings.forEachIndexed { index, ending ->
+                append(if (index == selectedEnding) "> " else "  ")
+                append(ending.uppercase())
+                if (ending == "reconciliation" && !canReconcile) {
+                    append(" [EVIDENCE REQUIRED]")
+                }
+                append("\n")
+            }
+        }
+    }
+
+    fun moveDecision(direction: Int): Boolean {
+        if (currentPhase != "resolution") return false
+        selectedEnding = (selectedEnding + direction + endings.size) % endings.size
+        renderDecision()
+        return true
+    }
+
+    fun selectedDecision(): String? {
+        if (currentPhase != "resolution") return null
+        val ending = endings[selectedEnding]
+        if (ending == "reconciliation" && !canReconcile) return null
+        return ending
+    }
+
+    fun isChoosingEnding(): Boolean = currentPhase == "resolution"
+
+    fun isChoosingTerminal(): Boolean = terminalChoices.isNotEmpty() && !terminalCompleted
+
+    fun moveTerminalSelection(direction: Int): Boolean {
+        if (!isChoosingTerminal()) return false
+        terminalSelection = (terminalSelection + direction + terminalChoices.size) % terminalChoices.size
+        renderDecision()
+        return true
+    }
+
+    fun selectedTerminalChoice(): Int? = if (isChoosingTerminal()) terminalSelection else null
+
+    fun terminalResult(correct: Boolean, narration: String) {
+        terminalFeedback = narration
+        if (correct) terminalCompleted = true
+        renderDecision()
+    }
+
 }
