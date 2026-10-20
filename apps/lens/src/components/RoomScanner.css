@@ -569,3 +569,172 @@
     animation: none;
   }
 }
+
+
+/* THRESHOLD SCANNER RESULTS — SCROLLABLE MOBILE INVENTORY */
+.scanner-viewport.scanner-results {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  background: #050b10;
+}
+.scanner-results .scanner-live-video,
+.scanner-results .scanner-captured-image,
+.scanner-results .scanner-camera-tint,
+.scanner-results .scanner-camera-scanlines,
+.scanner-results .scanner-hud-reticle { display: none; }
+.scanner-results .scanner-hud-header {
+  position: relative;
+  inset: auto;
+  order: 0;
+  transform: none;
+  padding: calc(env(safe-area-inset-top, 0px) + 20px) 16px 12px;
+  border-bottom: 1px solid rgba(0,235,255,.18);
+}
+.scanner-results .scanner-camera-status {
+  white-space: normal;
+  text-align: right;
+}
+.scanner-results .scanner-navigation {
+  position: relative;
+  inset: auto;
+  order: 1;
+  padding: 12px 16px 0;
+  gap: 8px;
+}
+.scanner-results .scanner-navigation .scanner-exit-button {
+  flex: 1 1 145px;
+  min-width: 0;
+}
+.scanner-results .scanner-hud-bottom {
+  position: relative;
+  inset: auto;
+  order: 2;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 16px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: transparent;
+}
+.scanner-results .scanner-hud-message { max-width: none; }
+.scanner-results .scanner-results-content,
+.scanner-results .scanner-results-inventory,
+.scanner-results .scanner-object-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.scanner-results .scanner-object-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(0,235,255,.35);
+  background: rgba(8,22,30,.94);
+  overflow-wrap: anywhere;
+}
+.scanner-results .scanner-object-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.scanner-results .scanner-object-card-heading strong {
+  color: #f5fbff;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.scanner-results .scanner-object-card-heading span,
+.scanner-results .scanner-object-note,
+.scanner-results .scanner-object-verified {
+  color: #00ebff;
+  font: 700 10px/1.5 monospace;
+  letter-spacing: .06em;
+}
+.scanner-results .scanner-object-card p,
+.scanner-results .scanner-results-empty {
+  margin: 0;
+  color: #dce8ec;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.scanner-results .scanner-object-card button { width: 100%; }
+.scanner-results .scanner-hud-footer { margin-top: 4px; }
+@media (orientation: landscape) and (max-height: 600px) {
+  .scanner-results .scanner-hud-bottom { width: 100%; max-width: 720px; padding: 16px; }
+}
+
+/* Player verification actions */
+.scanner-results .scanner-object-review-actions,
+.scanner-results .scanner-object-edit { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.scanner-results .scanner-object-edit input {
+  width: 100%; min-width: 0; padding: 12px; font-size: 16px;
+  color: #fff; background: #14191d; border: 1px solid #82949a;
+}
+
+
+/* Dedicated post-scan review screen: independent of the camera HUD. */
+.lens:has(.scanner-review-page) { padding: 0; display: block; overflow: visible; }
+.lens-shell:has(.scanner-review-page) { width: 100%; max-width: none; height: auto; max-height: none; margin: 0; }
+.scanner-review-page { box-sizing: border-box; position: relative; width: 100%; min-height: 100dvh; height: auto; overflow: visible; background: #071116; color: #f4fbfc; font-family: system-ui, sans-serif; }
+.scanner-review-page *, .scanner-review-page *::before, .scanner-review-page *::after { box-sizing: border-box; }
+.scanner-review-inner { width: 100%; max-width: 680px; margin: 0 auto; padding: calc(env(safe-area-inset-top, 0px) + 24px) 16px calc(env(safe-area-inset-bottom, 0px) + 48px); display: flex; flex-direction: column; gap: 20px; }
+.scanner-review-header { display: flex; flex-direction: column; gap: 8px; }
+.scanner-review-eyebrow, .scanner-review-summary strong, .scanner-review-add label, .scanner-review-edit label { color: #38e5ee; font: 700 12px/1.4 monospace; letter-spacing: .09em; }
+.scanner-review-header h1 { font-size: clamp(25px, 7vw, 34px); line-height: 1.1; margin: 0; color: #fff; }
+.scanner-review-header p { color: #a8bec4; font-size: 13px; margin: 0; }
+.scanner-review-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.scanner-review-toolbar button { flex: 1 1 145px; }
+.scanner-review-page button { min-height: 44px; padding: 10px 12px; border: 1px solid #47727b; border-radius: 3px; color: #e4f5f7; background: #11242b; font: 700 12px/1.35 monospace; letter-spacing: .03em; cursor: pointer; white-space: normal; overflow-wrap: anywhere; }
+.scanner-review-page button:disabled { opacity: .5; cursor: not-allowed; }
+.scanner-review-page button.scanner-review-primary { background: #34d9e4; color: #041419; border-color: #34d9e4; }
+.scanner-review-summary { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid #36545c; }
+.scanner-review-summary span, .scanner-review-empty { font-size: 13px; color: #b1c8ce; }
+.scanner-review-list { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.scanner-review-card { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 16px; min-width: 0; width: 100%; background: #10242b; border: 1px solid #325761; border-radius: 5px; overflow-wrap: anywhere; }
+.scanner-review-card-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scanner-review-card h2 { font-size: 17px; line-height: 1.35; margin: 0; color: #fff; text-transform: uppercase; }
+.scanner-review-status { color: #5fe5ec; font: 700 11px monospace; }
+.scanner-review-description { margin: 0; color: #d0e1e5; font-size: 14px; line-height: 1.55; }
+.scanner-review-note { margin: 0; color: #a6c3ca; font-size: 12px; line-height: 1.5; }
+.scanner-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scanner-review-actions button { flex: 1 1 90px; min-width: 0; }
+.scanner-review-edit, .scanner-review-add { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.scanner-review-add { border-top: 1px solid #36545c; padding-top: 20px; }
+.scanner-review-page input { width: 100%; min-width: 0; padding: 13px 12px; font: 16px system-ui, sans-serif; color: #fff; background: #0d1b21; border: 1px solid #6a858c; border-radius: 3px; }
+.scanner-review-error { padding: 12px; border: 1px solid #ff7985; color: #ffc4ca; font-size: 13px; }
+@media (max-width: 350px) { .scanner-review-actions button { flex-basis: 100%; } }
+
+
+/* Room Discoveries: scroll independently of the camera screen and app shell. */
+.scanner-review-page {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+  z-index: 20;
+}
+
+/* Preserve the existing scanner's own scroll behavior for older results markup. */
+.scanner-viewport.scanner-results {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}

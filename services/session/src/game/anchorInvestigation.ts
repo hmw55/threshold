@@ -13,6 +13,7 @@ export function investigateAnchor(
   state: GameState,
   puzzle: BoundPuzzle,
   selectedObjectRef: string,
+  evidenceAccepted = false,
 ): AnchorInvestigationResult {
   if (state.phase !== "investigation") {
     throw new Error("Anchor investigation is not active");
@@ -26,7 +27,7 @@ export function investigateAnchor(
     throw new Error("Invalid anchor puzzle");
   }
 
-  if (selectedObjectRef !== puzzle.objectRef) {
+  if (!evidenceAccepted && selectedObjectRef !== puzzle.objectRef) {
     return {
       correct: false,
       state,

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  environmentClient,
+  type DetectedEnvironmentObject,
+} from "../services/environmentClient";
+import {
   sessionClient,
   type ScanGroup,
 } from "../services/sessionClient";
@@ -58,11 +62,19 @@ export function RoomScanner({
   const capturedImagesRef = useRef<CapturedImage[]>([]);
   const [scanComplete, setScanComplete] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [scanGroupId, setScanGroupId] = useState<string | null>(null);
   const [objectName, setObjectName] = useState("");
   const [confirmedObjects, setConfirmedObjects] = useState<string[]>([]);
   const [isSavingObject, setIsSavingObject] = useState(false);
+  const [detectedObjects, setDetectedObjects] =
+    useState<DetectedEnvironmentObject[]>([]);
+  const [isLoadingObjects, setIsLoadingObjects] = useState(false);
+  const [editingObjectId, setEditingObjectId] = useState<string | null>(null);
+  const [correctedName, setCorrectedName] = useState("");
+  const [confirmingObjectId, setConfirmingObjectId] =
+    useState<string | null>(null);
   const uploadInProgressRef = useRef(false);
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
   const [scanGroups, setScanGroups] = useState<ScanGroup[]>([]);
@@ -299,6 +311,69 @@ export function RoomScanner({
     setError(null);
   }
 
+  async function loadDetectedObjects() {
+    setIsLoadingObjects(true);
+    try {
+      const result = await environmentClient.getEnvironmentObjects(
+        sessionCode, playerId, playerToken,
+      );
+      setDetectedObjects(result.objects);
+    } catch (caught) {
+      setError(caught instanceof Error
+        ? `UNABLE TO LOAD OBJECTS: ${caught.message}`
+        : "UNABLE TO LOAD OBJECTS.");
+    } finally {
+      setIsLoadingObjects(false);
+    }
+  }
+
+  async function verifyDetectedObject(objectId: string) {
+    if (confirmingObjectId) return;
+    setConfirmingObjectId(objectId);
+    setError(null);
+    try {
+      const result = await environmentClient.confirmEnvironmentObject(
+        sessionCode, objectId, playerId, playerToken,
+      );
+      setDetectedObjects((previous) =>
+        previous.map((object) =>
+          object.id === objectId ? result.object : object,
+        ),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error
+        ? `CONFIRMATION FAILED: ${caught.message}`
+        : "CONFIRMATION FAILED.");
+    } finally {
+      setConfirmingObjectId(null);
+    }
+  }
+
+  async function reviewDetectedObject(objectId: string, action: "correct" | "reject") {
+    if (confirmingObjectId) return;
+    const name = correctedName.trim();
+    if (action === "correct" && (name.length < 2 || name.length > 100)) {
+      setError("ENTER AN OBJECT NAME BETWEEN 2 AND 100 CHARACTERS.");
+      return;
+    }
+    setConfirmingObjectId(objectId);
+    setError(null);
+    try {
+      const result = await environmentClient.reviewEnvironmentObject(
+        sessionCode, objectId, playerId, playerToken, action,
+        action === "correct" ? name : undefined,
+      );
+      setDetectedObjects((previous) => previous.map((object) =>
+        object.id === objectId ? result.object : object));
+      setEditingObjectId(null);
+      setCorrectedName("");
+    } catch (caught) {
+      setError(caught instanceof Error ? `REVIEW FAILED: ${caught.message}` : "REVIEW FAILED.");
+    } finally {
+      setConfirmingObjectId(null);
+    }
+  }
+
   async function confirmObject() {
     const name = objectName.trim();
 
@@ -398,11 +473,62 @@ export function RoomScanner({
         playerToken,
       );
 
-      if (finalized.group.status !== "uploaded") {
+      if (
+        !["uploaded", "analyzing", "completed", "failed"].includes(
+          finalized.group.status,
+        )
+      ) {
         throw new Error("Scan finalization was not confirmed");
       }
 
-      setScanComplete(true);
+      setIsAnalyzing(true);
+
+      try {
+        let status = finalized.group.status;
+
+        for (let attempt = 0; attempt < 120; attempt++) {
+          if (status === "completed") {
+            break;
+          }
+
+          if (status === "failed") {
+            throw new Error(
+              "Environment analysis failed. Retry to run the scan again.",
+            );
+          }
+
+          await new Promise<void>((resolve) =>
+            setTimeout(resolve, 2000),
+          );
+
+          const result = await sessionClient.getScanGroups(
+            sessionCode,
+            playerId,
+            playerToken,
+          );
+
+          const current = result.groups.find(
+            (group) => group.id === groupId,
+          );
+
+          if (!current) {
+            throw new Error("Scan group disappeared during analysis.");
+          }
+
+          status = current.status;
+        }
+
+        if (status !== "completed") {
+          throw new Error(
+            "Environment analysis timed out. Retry to check its status.",
+          );
+        }
+
+        setScanComplete(true);
+        void loadDetectedObjects();
+      } finally {
+        setIsAnalyzing(false);
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -415,6 +541,139 @@ export function RoomScanner({
     }
   }
 
+
+
+  // Completed calibration is a standalone document, never part of the camera HUD.
+  if (scanTarget && scanComplete) {
+    const roomObjects = detectedObjects.filter(
+      (object) => object.location === scanTarget.label,
+    );
+
+    return (
+      <section className="scanner-review-page" aria-label="Review room discoveries">
+        <div className="scanner-review-inner">
+          <header className="scanner-review-header">
+            <span className="scanner-review-eyebrow">THRESHOLD // LENS</span>
+            <h1>Room discoveries</h1>
+            <p>{scanTarget.label} // {capturedImages.length} images secured</p>
+          </header>
+
+          <div className="scanner-review-toolbar">
+            <button type="button" onClick={onClose} className="scanner-review-back">
+              ← EXIT SCANNER
+            </button>
+            <button type="button" className="scanner-review-back" onClick={() => {
+              capturedImages.forEach((captured) => URL.revokeObjectURL(captured.url));
+              setCapturedImages([]);
+              capturedImagesRef.current = [];
+              setImage(null);
+              setPreviewUrl(null);
+              setScanComplete(false);
+              setCameraStatus("initializing");
+              setScanGroupId(null);
+              setUploadedCount(0);
+              setObjectName("");
+              setConfirmedObjects([]);
+              setDetectedObjects([]);
+              setEditingObjectId(null);
+              setScanTarget(null);
+              setError(null);
+            }}>
+              SCAN ANOTHER THRESHOLD
+            </button>
+          </div>
+
+          {error && <p className="scanner-review-error" role="alert">{error}</p>}
+          <div className="scanner-review-summary">
+            <strong>AI-DETECTED OBJECTS</strong>
+            <span>{roomObjects.length} discoveries · Review before gameplay</span>
+          </div>
+
+          {isLoadingObjects ? (
+            <p className="scanner-review-empty">LOADING VISUAL INVENTORY...</p>
+          ) : roomObjects.length === 0 ? (
+            <p className="scanner-review-empty">NO OBJECTS DETECTED. ADD ONE BELOW.</p>
+          ) : (
+            <div className="scanner-review-list">
+              {roomObjects.map((object) => (
+                <article key={object.id} className="scanner-review-card">
+                  <div className="scanner-review-card-top">
+                    <h2>{object.name}</h2>
+                    <span className="scanner-review-status">
+                      {object.recognitionStatus === "rejected" ? "REJECTED" :
+                        object.recognitionStatus === "confirmed" ? "VERIFIED" : "UNVERIFIED"}
+                    </span>
+                  </div>
+                  {object.description && <p className="scanner-review-description">{object.description}</p>}
+                  {object.recognitionStatus === "rejected" ? (
+                    <p className="scanner-review-note">Excluded from gameplay</p>
+                  ) : (
+                    <>
+                      {object.recognitionStatus === "confirmed" ? (
+                        <p className="scanner-review-note">✓ Player verified</p>
+                      ) : (
+                        <p className="scanner-review-note">
+                          {object.requiresCloserScan ? "Uncertain detection — check carefully" : "Awaiting player verification"}
+                        </p>
+                      )}
+                      {editingObjectId === object.id ? (
+                        <div className="scanner-review-edit">
+                          <label htmlFor={`correct-${object.id}`}>CORRECT OBJECT NAME</label>
+                          <input id={`correct-${object.id}`} type="text" maxLength={100}
+                            value={correctedName} onChange={(event) => setCorrectedName(event.target.value)}
+                            disabled={confirmingObjectId !== null} />
+                          <div className="scanner-review-actions">
+                            <button type="button" className="scanner-review-primary"
+                              disabled={confirmingObjectId !== null || correctedName.trim().length < 2}
+                              onClick={() => void reviewDetectedObject(object.id, "correct")}>SAVE CORRECTION</button>
+                            <button type="button" onClick={() => setEditingObjectId(null)}>CANCEL</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="scanner-review-actions">
+                          {object.recognitionStatus !== "confirmed" && (
+                            <button type="button" className="scanner-review-primary"
+                              disabled={confirmingObjectId !== null}
+                              onClick={() => void verifyDetectedObject(object.id)}>
+                              {confirmingObjectId === object.id ? "SAVING..." : "CONFIRM"}
+                            </button>
+                          )}
+                          <button type="button" disabled={confirmingObjectId !== null}
+                            onClick={() => { setEditingObjectId(object.id); setCorrectedName(object.name); }}>
+                            CORRECT
+                          </button>
+                          <button type="button" disabled={confirmingObjectId !== null}
+                            onClick={() => void reviewDetectedObject(object.id, "reject")}>
+                            REJECT
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+
+          <div className="scanner-review-add">
+            <label htmlFor="confirmed-object">ADD A MISSED OBJECT</label>
+            <input id="confirmed-object" type="text" maxLength={100}
+              placeholder="e.g. bookshelf, lamp, coffee table"
+              value={objectName} onChange={(event) => setObjectName(event.target.value)}
+              disabled={isSavingObject} />
+            <button type="button" className="scanner-review-primary"
+              onClick={() => void confirmObject()}
+              disabled={isSavingObject || objectName.trim().length < 2}>
+              {isSavingObject ? "REGISTERING..." : "ADD OBJECT"}
+            </button>
+            {confirmedObjects.length > 0 && (
+              <p className="scanner-review-note" role="status">{confirmedObjects.length} manually added: {confirmedObjects.join(", ")}</p>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   if (!scanTarget) {
     return (
@@ -515,7 +774,7 @@ export function RoomScanner({
 
   return (
     <section
-      className="scanner-viewport"
+      className={`scanner-viewport${scanComplete ? " scanner-results" : ""}`}
       aria-label="Threshold environment scanner"
     >
       <div className="scanner-navigation">
@@ -558,6 +817,7 @@ export function RoomScanner({
             setUploadedCount(0);
             setObjectName("");
             setConfirmedObjects([]);
+             setDetectedObjects([]);
             setScanTarget(null);
             setError(null);
           }}
@@ -640,9 +900,81 @@ export function RoomScanner({
         )}
 
         {scanComplete ? (
-          <div className="scanner-hud-actions">
+          <div className="scanner-results-content">
             <div className="scanner-hud-confirmation" role="status">
               ✓ {capturedImages.length} ENVIRONMENT IMAGES SECURED
+            </div>
+
+            <div className="scanner-results-inventory">
+              <span className="scanner-hud-label">[ AI-DETECTED OBJECTS ]</span>
+              {isLoadingObjects ? (
+                <p className="scanner-results-empty">LOADING VISUAL INVENTORY...</p>
+              ) : (
+                <div className="scanner-object-list">
+                  {detectedObjects
+                    .filter((object) => object.location === scanTarget.label)
+                    .map((object) => (
+                      <article key={object.id} className="scanner-object-card">
+                        <div className="scanner-object-card-heading">
+                          <strong>{object.name}</strong>
+                          <span>{object.recognitionStatus === "confirmed" ? "VERIFIED" : "UNVERIFIED"}</span>
+                        </div>
+                        {object.description && <p>{object.description}</p>}
+                        {object.recognitionStatus === "rejected" ? (
+                          <p className="scanner-object-note">✕ REJECTED — EXCLUDED FROM GAMEPLAY</p>
+                        ) : (
+                          <>
+                            {object.recognitionStatus === "confirmed" ? (
+                              <p className="scanner-object-verified">✓ PLAYER VERIFIED</p>
+                            ) : (
+                              <>
+                                <p className="scanner-object-note">
+                                  {object.requiresCloserScan
+                                    ? "UNCERTAIN DETECTION — CHECK CAREFULLY"
+                                    : "VERIFY THIS OBJECT BEFORE GAMEPLAY"}
+                                </p>
+                                <button type="button" className="scanner-hud-secondary"
+                                  disabled={confirmingObjectId !== null}
+                                  onClick={() => void verifyDetectedObject(object.id)}>
+                                  {confirmingObjectId === object.id ? "CONFIRMING..." : "CONFIRM OBJECT"}
+                                </button>
+                              </>
+                            )}
+                            {editingObjectId === object.id ? (
+                              <div className="scanner-object-edit">
+                                <label htmlFor={`correct-${object.id}`} className="scanner-hud-label">CORRECT OBJECT NAME</label>
+                                <input id={`correct-${object.id}`} type="text" maxLength={100}
+                                  value={correctedName} onChange={(event) => setCorrectedName(event.target.value)}
+                                  disabled={confirmingObjectId !== null} />
+                                <button type="button" className="scanner-hud-primary"
+                                  disabled={confirmingObjectId !== null || correctedName.trim().length < 2}
+                                  onClick={() => void reviewDetectedObject(object.id, "correct")}>SAVE CORRECTION</button>
+                                <button type="button" className="scanner-hud-secondary"
+                                  onClick={() => setEditingObjectId(null)}>CANCEL</button>
+                              </div>
+                            ) : (
+                              <div className="scanner-object-review-actions">
+                                <button type="button" className="scanner-hud-secondary"
+                                  disabled={confirmingObjectId !== null}
+                                  onClick={() => { setEditingObjectId(object.id); setCorrectedName(object.name); }}>
+                                  CORRECT NAME
+                                </button>
+                                <button type="button" className="scanner-hud-secondary"
+                                  disabled={confirmingObjectId !== null}
+                                  onClick={() => void reviewDetectedObject(object.id, "reject")}>
+                                  {confirmingObjectId === object.id ? "SAVING..." : "REJECT DETECTION"}
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </article>
+                    ))}
+                  {detectedObjects.filter((object) => object.location === scanTarget.label).length === 0 && (
+                    <p className="scanner-results-empty">NO OBJECTS DETECTED IN THIS SCAN. YOU CAN ADD ONE BELOW.</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <label htmlFor="confirmed-object" className="scanner-hud-label">
@@ -729,7 +1061,7 @@ export function RoomScanner({
               >
                 {isUploading
                   ? uploadedCount === capturedImages.length
-                    ? "FINALIZING SCAN..."
+                    ? isAnalyzing ? "ANALYZING ENVIRONMENT..." : "FINALIZING SCAN..."
                     : `UPLOADING ${uploadedCount}/${capturedImages.length}...`
                   : uploadedCount === capturedImages.length
                     ? "RETRY FINALIZATION"

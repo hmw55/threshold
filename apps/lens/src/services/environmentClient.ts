@@ -1,4 +1,3 @@
-
 import {
   normalizeCode,
   playerHeaders,
@@ -11,12 +10,7 @@ export interface ScanGroup {
   thresholdId: string | null;
   label: string;
   createdBy: string;
-  status:
-    | "pending"
-    | "uploaded"
-    | "analyzing"
-    | "completed"
-    | "failed";
+  status: "pending" | "uploaded" | "analyzing" | "completed" | "failed";
   createdAt: string;
 }
 
@@ -32,7 +26,62 @@ export interface ScanImageUploadResult {
   limit: number;
 }
 
+export interface DetectedEnvironmentObject {
+  id: string;
+  environmentId: string;
+  name: string;
+  category: string;
+  description: string | null;
+  location: string | null;
+  recognitionStatus: "uncertain" | "collection_only" | "confirmed" | "rejected";
+  requiresCloserScan: boolean;
+  reviewAction?: "correct" | "reject" | null;
+}
+
 export const environmentClient = {
+  getEnvironmentObjects(
+    code: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<{ objects: DetectedEnvironmentObject[] }> {
+    return request(`/sessions/${normalizeCode(code)}/environment/objects`, {
+      method: "GET",
+      headers: playerHeaders(playerId, playerToken),
+    });
+  },
+
+  confirmEnvironmentObject(
+    code: string,
+    objectId: string,
+    playerId: string,
+    playerToken: string,
+  ): Promise<{ object: DetectedEnvironmentObject }> {
+    return request(
+      `/sessions/${normalizeCode(code)}/environment/objects/${encodeURIComponent(objectId)}/confirm`,
+      {
+        method: "POST",
+        body: JSON.stringify({ playerId, playerToken }),
+      },
+    );
+  },
+
+  reviewEnvironmentObject(
+    code: string,
+    objectId: string,
+    playerId: string,
+    playerToken: string,
+    action: "correct" | "reject",
+    name?: string,
+  ): Promise<{ object: DetectedEnvironmentObject }> {
+    return request(
+      `/sessions/${normalizeCode(code)}/environment/objects/${encodeURIComponent(objectId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ playerId, playerToken, action, name }),
+      },
+    );
+  },
+
   registerEnvironmentObject(
     code: string,
     playerId: string,
@@ -40,25 +89,17 @@ export const environmentClient = {
     scanGroupId: string,
     name: string,
   ): Promise<{
-    object: {
-      id: string;
-      name: string;
-      category: string;
-      location: string;
-    };
+    object: { id: string; name: string; category: string; location: string };
   }> {
-    return request(
-      `/sessions/${normalizeCode(code)}/environment/objects`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          playerId,
-          playerToken,
-          scanGroupId,
-          name: name.trim(),
-        }),
-      },
-    );
+    return request(`/sessions/${normalizeCode(code)}/environment/objects`, {
+      method: "POST",
+      body: JSON.stringify({
+        playerId,
+        playerToken,
+        scanGroupId,
+        name: name.trim(),
+      }),
+    });
   },
 
   createScanGroup(
@@ -68,18 +109,10 @@ export const environmentClient = {
     thresholdId: string | null,
     label: string,
   ): Promise<{ group: ScanGroup }> {
-    return request(
-      `/sessions/${normalizeCode(code)}/scan-groups`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          playerId,
-          playerToken,
-          thresholdId,
-          label,
-        }),
-      },
-    );
+    return request(`/sessions/${normalizeCode(code)}/scan-groups`, {
+      method: "POST",
+      body: JSON.stringify({ playerId, playerToken, thresholdId, label }),
+    });
   },
 
   getScanGroups(
@@ -87,13 +120,10 @@ export const environmentClient = {
     playerId: string,
     playerToken: string,
   ): Promise<{ groups: ScanGroup[] }> {
-    return request(
-      `/sessions/${normalizeCode(code)}/scan-groups`,
-      {
-        method: "GET",
-        headers: playerHeaders(playerId, playerToken),
-      },
-    );
+    return request(`/sessions/${normalizeCode(code)}/scan-groups`, {
+      method: "GET",
+      headers: playerHeaders(playerId, playerToken),
+    });
   },
 
   finalizeScanGroup(
@@ -106,10 +136,7 @@ export const environmentClient = {
       `/sessions/${normalizeCode(code)}/scan-groups/${encodeURIComponent(groupId)}/finalize`,
       {
         method: "POST",
-        body: JSON.stringify({
-          playerId,
-          playerToken,
-        }),
+        body: JSON.stringify({ playerId, playerToken }),
       },
     );
   },

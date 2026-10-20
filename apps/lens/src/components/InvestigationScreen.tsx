@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { gameClient } from "../services/gameClient";
 import type {
   AnchorPuzzleResponse,
+  PlayerMissionsResponse,
   GamePhase,
   SignalFragment,
   TransmissionFragment,
@@ -51,6 +52,24 @@ export function InvestigationScreen({
   const [error, setError] =
     useState<string | null>(null);
 
+  const [missionData, setMissionData] = useState<PlayerMissionsResponse | null>(null);
+
+  const [examinedObjectRef, setExaminedObjectRef] = useState<string | null>(null);
+  const [observation, setObservation] = useState("");
+  const [physicalEvidence, setPhysicalEvidence] = useState<File | null>(null);
+  const [physicalEvidencePreview, setPhysicalEvidencePreview] =
+    useState<string | null>(null);
+  const [physicalEvidenceFeedback, setPhysicalEvidenceFeedback] =
+    useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (physicalEvidencePreview) {
+        URL.revokeObjectURL(physicalEvidencePreview);
+      }
+    };
+  }, [physicalEvidencePreview]);
+
   const submittingRef = useRef(false);
   const requestVersionRef = useRef(0);
 
@@ -78,6 +97,23 @@ export function InvestigationScreen({
 
         setGamePhase(gameState.game.phase);
         setError(null);
+
+        try {
+          const missions = await gameClient.getMissions(
+            sessionCode,
+            playerId,
+            playerToken,
+          );
+
+          if (
+            !cancelled &&
+            requestVersion === requestVersionRef.current
+          ) {
+            setMissionData(missions);
+          }
+        } catch {
+          // Mission telemetry should not interrupt gameplay.
+        }
 
         if (gameState.game.phase !== "investigation") {
           return;
@@ -167,6 +203,9 @@ export function InvestigationScreen({
     setSignalFragments([]);
     setSelectedOrder([]);
     setNarration(null);
+    setMissionData(null);
+    setExaminedObjectRef(null);
+    setObservation("");
     setError(null);
 
     void synchronize();
@@ -200,6 +239,11 @@ export function InvestigationScreen({
       stage !== "anchor"
     ) return;
 
+    if (examinedObjectRef !== objectRef || observation.trim().length < 15) {
+      setError("Record an observation before submitting.");
+      return;
+    }
+
     beginSubmission();
 
     try {
@@ -208,6 +252,7 @@ export function InvestigationScreen({
         playerId,
         playerToken,
         objectRef,
+        observation.trim(),
       );
 
       setNarration(result.narration);
@@ -298,6 +343,76 @@ export function InvestigationScreen({
     }
   }
 
+  async function submitPhysicalEvidence(missionId: string) {
+    if (
+      submittingRef.current ||
+      !physicalEvidence ||
+      !missionId.startsWith("physical-arrangement-")
+    ) {
+      return;
+    }
+
+    beginSubmission();
+    setPhysicalEvidenceFeedback(null);
+
+    try {
+      const result = await gameClient.submitPhysicalMissionEvidence(
+        sessionCode,
+        playerId,
+        playerToken,
+        missionId,
+        physicalEvidence,
+      );
+
+      setPhysicalEvidenceFeedback(result.feedback);
+
+      if (result.accepted) {
+        const missions = await gameClient.getMissions(
+          sessionCode,
+          playerId,
+          playerToken,
+        );
+        setMissionData(missions);
+        setNarration(result.feedback);
+
+        setPhysicalEvidence(null);
+        setPhysicalEvidencePreview((previous) => {
+          if (previous) URL.revokeObjectURL(previous);
+          return null;
+        });
+      }
+    } catch (caught) {
+      setPhysicalEvidenceFeedback(
+        caught instanceof Error
+          ? caught.message
+          : "Evidence verification failed. Please try again.",
+      );
+    } finally {
+      try {
+        const missions = await gameClient.getMissions(
+          sessionCode,
+          playerId,
+          playerToken,
+        );
+        setMissionData(missions);
+      } catch {
+        // Keep the verification result visible if refresh fails.
+      }
+      endSubmission();
+    }
+  }
+
+  function selectPhysicalEvidence(file: File | null) {
+    setPhysicalEvidenceFeedback(null);
+
+    setPhysicalEvidencePreview((previous) => {
+      if (previous) URL.revokeObjectURL(previous);
+      return file ? URL.createObjectURL(file) : null;
+    });
+
+    setPhysicalEvidence(file);
+  }
+
   function selectSignalFragment(fragmentId: string) {
     if (
       submittingRef.current ||
@@ -382,6 +497,106 @@ export function InvestigationScreen({
         </p>
       </header>
 
+      {missionData && (
+        <aside
+          className="investigation-transmission"
+          aria-label="Personal missions"
+        >
+          <p className="investigation-label">
+            [ LENS // PRIVATE ASSIGNMENTS ]
+          </p>
+
+          <p className="investigation-message">
+            YOUR SCORE: {missionData.score} POINTS
+          </p>
+
+          {missionData.missions
+            .filter((mission) =>
+              mission.assignedPlayerIds.includes(playerId)
+            )
+            .map((mission) => (
+              <div key={mission.id} className="investigation-mission">
+                <p className="investigation-label">
+                  {mission.private ? "[ CLASSIFIED ] " : "[ MISSION ] "}
+                  {mission.status === "completed"
+                    ? "COMPLETE"
+                    : "ACTIVE"}{" "}
+                  // {mission.points} PTS
+                </p>
+                <strong>{mission.title}</strong>
+                <p>{mission.description}</p>
+
+                {mission.id === "physical-arrangement-" + playerId &&
+                  mission.status !== "completed" &&
+                  mission.status !== "failed" && (
+                    <div className="physical-evidence">
+                      <p className="investigation-label">
+                        // PHYSICAL EVIDENCE REQUIRED
+                      </p>
+
+                      <p className="investigation-message">
+                        Arrange three safe household objects in a visible
+                        line from smallest to largest. Photograph the actual
+                        arrangement so the Architect can verify it.
+                      </p>
+
+                      <label className="investigation-action investigation-action-primary physical-evidence-picker">
+                        {physicalEvidence ? "RETAKE PHOTOGRAPH" : "TAKE EVIDENCE PHOTO"}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          capture="environment"
+                          disabled={submitting}
+                          onChange={(event) => {
+                            selectPhysicalEvidence(
+                              event.currentTarget.files?.[0] ?? null
+                            );
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+
+                      {physicalEvidencePreview && (
+                        <div className="physical-evidence-preview">
+                          <img
+                            src={physicalEvidencePreview}
+                            alt="Preview of physical mission evidence"
+                          />
+                          <p className="investigation-message">
+                            {physicalEvidence?.name}
+                          </p>
+                          <button
+                            type="button"
+                            className="investigation-action"
+                            disabled={submitting}
+                            onClick={() => selectPhysicalEvidence(null)}
+                          >
+                            REMOVE PHOTO
+                          </button>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        className="investigation-action investigation-action-primary"
+                        disabled={submitting || !physicalEvidence}
+                        onClick={() => void submitPhysicalEvidence(mission.id)}
+                      >
+                        {submitting ? "VERIFYING EVIDENCE..." : "SUBMIT FOR VERIFICATION"}
+                      </button>
+
+                      {physicalEvidenceFeedback && (
+                        <p className="investigation-message" role="status">
+                          {physicalEvidenceFeedback}
+                        </p>
+                      )}
+                    </div>
+                  )}
+              </div>
+            ))}
+        </aside>
+      )}
+
       {!loading && gamePhase !== "investigation" ? (
         <div className="investigation-transmission" role="status">
           <p className="investigation-label">
@@ -426,8 +641,43 @@ export function InvestigationScreen({
 
               <div>
                 <p className="investigation-label">
-                  // SELECT AN OBJECT TO INVESTIGATE
+                  // CHOOSE AN OBJECT TO EXAMINE
                 </p>
+
+                {examinedObjectRef && (
+                  <div className="investigation-transmission">
+                    <p className="investigation-label">
+                      [ LENS // FIELD EXAMINATION ]
+                    </p>
+                    <p>
+                      Examine this object in your surroundings.
+                      What do you notice?
+                    </p>
+                    <textarea
+                      aria-label="Field observation"
+                      value={observation}
+                      onChange={(event) => setObservation(event.target.value)}
+                      placeholder="Describe what you actually observe..."
+                      rows={4}
+                      style={{
+                        width: "100%",
+                        boxSizing: "border-box",
+                        padding: 12,
+                        background: "#071017",
+                        color: "#fff",
+                        border: "1px solid #20c6d8",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="investigation-object"
+                      disabled={submitting || observation.trim().length < 15}
+                      onClick={() => void inspectObject(examinedObjectRef)}
+                    >
+                      SUBMIT INVESTIGATION
+                    </button>
+                  </div>
+                )}
 
                 <div className="investigation-objects">
                   {anchor.objects.map((object) => (
@@ -436,9 +686,12 @@ export function InvestigationScreen({
                       type="button"
                       className="investigation-object"
                       disabled={submitting}
-                      onClick={() =>
-                        void inspectObject(object.ref)
-                      }
+                      onClick={() => {
+                        setExaminedObjectRef(object.ref);
+                        setObservation("");
+                        setNarration(null);
+                        setError(null);
+                      }}
                     >
                       <span className="investigation-object-name">
                         {object.name}
@@ -540,10 +793,16 @@ export function InvestigationScreen({
                         key={fragment.id}
                         type="button"
                         className="investigation-object"
-                        disabled={submitting || selected}
-                        onClick={() =>
-                          selectSignalFragment(fragment.id)
-                        }
+                        disabled={submitting}
+                        onClick={() => {
+                          if (selected) {
+                            setSelectedOrder((current) =>
+                              current.filter((id) => id !== fragment.id)
+                            );
+                          } else {
+                            selectSignalFragment(fragment.id);
+                          }
+                        }}
                       >
                         <span className="investigation-object-name">
                           {fragment.timestamp}

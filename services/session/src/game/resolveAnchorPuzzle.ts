@@ -48,23 +48,12 @@ export function resolveAnchorPuzzle(
 
   if (!target) return null;
 
-  const normalizedName = target.name.trim();
-  const characters = Array.from(normalizedName);
-
-  const firstLetter = characters[0]?.toUpperCase() ?? "?";
-  const lastLetter =
-    characters[characters.length - 1]?.toUpperCase() ?? "?";
-
-  const sameNameCount = objects.filter(
-    (object) =>
-      object.name.trim().toLowerCase() ===
-      normalizedName.toLowerCase(),
-  ).length;
-
+  // Keep the selected anchor hidden from the player.
+  // The environment determines the target, not its spelling.
   const clue =
-    sameNameCount > 1
-      ? `The first signal is bound to an object named "${normalizedName}". Multiple matching objects were detected. Investigate the matching objects to locate its source.`
-      : `The first signal is bound to an object whose name begins with "${firstLetter}", ends with "${lastLetter}", and contains ${characters.length} characters. Identify the source.`;
+    "A signal has attached itself to something in your environment. " +
+    "The Architect cannot identify its source from the initial scan alone. " +
+    "Investigate your surroundings and examine objects that may be carrying the transmission.";
 
   return {
     puzzle: {

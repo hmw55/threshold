@@ -54,14 +54,8 @@ export class ArchitectDecisionService {
       allowedObjectRefs,
     );
 
-    // Temporary safety boundary:
-    // The Architect cannot propose state changes yet.
-    if (decision.proposedEffects.length > 0) {
-      throw new Error(
-        "Architect proposed unauthorized game-state effects",
-      );
-    }
-
+    // AI effects are proposals only. This service never mutates game state.
+    // The calling game route must explicitly authorize each proposed effect.
     return decision;
   }
 }

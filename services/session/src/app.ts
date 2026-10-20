@@ -1,3 +1,12 @@
+
+import { completeInteraction } from "./game/interactionService.js";
+import { lastWitnessInteractions } from "./game/lastWitnessInteractions.js";
+import { contradictionPuzzle } from "./game/contradictionPuzzle.js";
+import {
+  submitContradictionAnswer,
+  submitMissingWitnessAnswer,
+} from "./game/gameplayService.js";
+import { missingWitnessPuzzle } from "./game/missingWitnessPuzzle.js";
 import {
   createHash,
   randomBytes,
@@ -18,7 +27,11 @@ import {
   listScanGroups,
   createScanImage,
   createEnvironment,
+  listEnvironmentObjects,
   createEnvironmentObject,
+  confirmEnvironmentObject,
+  reviewEnvironmentObject,
+  listEnvironmentObjectsForSession,
   createEnvironmentObservation,
   countScanImages,
   loadGameState,
@@ -39,10 +52,14 @@ import {
   removeImage,
 } from "./imageStorage.js";
 import { lastWitnessBlueprint } from "./game/lastWitnessBlueprint.js";
-import { createInitialGameState } from "./game/gameState.js";
+import { createInitialGameState, type GameMission } from "./game/gameState.js";
 import { advanceGame } from "./game/gameEngine.js";
+import { completeMission } from "./game/missionEngine.js";
 import { resolveAnchorPuzzle } from "./game/resolveAnchorPuzzle.js";
 import { investigateAnchor } from "./game/anchorInvestigation.js";
+import { ArchitectDecisionService } from "./architect/architectDecisionService.js";
+import { createAiProvider } from "./architect/createAiProvider.js";
+import { analyzeCalibration } from "./architect/analyzeCalibration.js";
 import {
   recoverTransmission,
   transmissionFragments,
@@ -114,6 +131,16 @@ const scanImageUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: MAX_SCAN_IMAGE_SIZE,
+    files: 1,
+    fields: 0,
+    parts: 1,
+  },
+}).single("image");
+
+const evidenceImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024,
     files: 1,
     fields: 0,
     parts: 1,
@@ -560,7 +587,7 @@ app.post("/sessions/:code/advance", (request, response) => {
         scanGroups.some(
           (group) =>
             group.thresholdId === threshold.id &&
-            ["uploaded", "analyzing", "completed"].includes(group.status),
+            group.status === "completed",
         ),
       );
 
@@ -594,7 +621,81 @@ app.post("/sessions/:code/advance", (request, response) => {
       type: "start",
     });
 
-    saveGameState(startedGame);
+    const playerStates = session.players.map((player) => ({
+      playerId: player.id,
+      score: 0,
+      completedMissionIds: [],
+    }));
+
+    const openingMissions: GameMission[] = session.players.map((player) => ({
+      id: "investigate-signal-" + player.id,
+      type: "investigate" as const,
+      title: "Find the Signal",
+      description:
+        "Investigate your physical surroundings. The Architect has detected " +
+        "an unexplained transmission connected to this environment.",
+      assignedPlayerIds: [player.id],
+      targetPlayerId: null,
+      objectRef: null,
+      points: 100,
+      status: "available" as const,
+      private: false,
+    }));
+
+    for (const player of session.players) {
+      openingMissions.push({
+        id: "physical-arrangement-" + player.id,
+        type: "investigate",
+        title: "Reconstruct the Signal",
+        description:
+          "Arrange three distinct, safe, movable household objects " +
+          "in a clearly visible line from smallest to largest. " +
+          "Use your Lens to photograph the completed arrangement. " +
+          "The Architect must verify the physical evidence.",
+        assignedPlayerIds: [player.id],
+        targetPlayerId: null,
+        objectRef: null,
+        points: 150,
+        status: "available",
+        private: false,
+      });
+    }
+
+    if (session.players.length > 1) {
+      const firstPlayer = session.players[0]!;
+
+      openingMissions.push({
+        id: "conceal-discovery-" + firstPlayer.id,
+        type: "conceal",
+        title: "Keep a Secret",
+        description:
+          "The Architect has contacted you privately. Keep your next " +
+          "discovery hidden from the others until the Architect reveals it.",
+        assignedPlayerIds: [firstPlayer.id],
+        targetPlayerId: null,
+        objectRef: null,
+        points: 75,
+        status: "available",
+        private: true,
+      });
+    }
+
+    saveGameState({
+      ...startedGame,
+      players: playerStates,
+      missions: openingMissions,
+      tvEvents: [
+        {
+          id: "expedition-opening",
+          type: "transmission",
+          message:
+            "The Architect has established contact. " +
+            "Your environment is now part of the investigation. " +
+            "Individual assignments have been transmitted to the Lenses.",
+          createdAt: Date.now(),
+        },
+      ],
+    });
   }
 
   response.json({ session });
@@ -741,6 +842,112 @@ app.post("/sessions/:code/restart", async (request, response) => {
   });
 });
 
+app.post(
+  "/sessions/:code/environment/objects/:objectId/confirm",
+  (request, response) => {
+    const session = getSession(request.params.code);
+
+    if (!session) {
+      response.status(404).json({ error: "session_not_found" });
+      return;
+    }
+
+    const { playerId, playerToken } = request.body ?? {};
+
+    if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+      response.status(401).json({ error: "invalid_player_credentials" });
+      return;
+    }
+
+    if (session.phase !== "calibrating") {
+      response.status(409).json({ error: "calibration_not_active" });
+      return;
+    }
+
+    if (!session.environmentId) {
+      response.status(409).json({ error: "environment_not_initialized" });
+      return;
+    }
+
+    const object = confirmEnvironmentObject(
+      request.params.objectId,
+      session.environmentId,
+      session.code,
+      null,
+    );
+
+    if (!object) {
+      response.status(404).json({ error: "environment_object_not_found" });
+      return;
+    }
+
+    response.json({ object });
+  },
+);
+
+app.post("/sessions/:code/environment/objects/:objectId/review", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const { playerId, playerToken, action, name } = request.body ?? {};
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" }); return;
+  }
+  if (session.phase !== "calibrating") {
+    response.status(409).json({ error: "calibration_not_active" }); return;
+  }
+  if (!session.environmentId) {
+    response.status(409).json({ error: "environment_not_initialized" }); return;
+  }
+  if (action !== "correct" && action !== "reject") {
+    response.status(400).json({ error: "invalid_review_action" }); return;
+  }
+  const correctedName = typeof name === "string" ? name.trim() : "";
+  if (action === "correct" && (correctedName.length < 2 || correctedName.length > 100)) {
+    response.status(400).json({ error: "invalid_object_name" }); return;
+  }
+  try {
+    const object = reviewEnvironmentObject(request.params.objectId,
+      session.environmentId, session.code, playerId, action,
+      action === "correct" ? correctedName : null);
+    if (!object) { response.status(404).json({ error: "environment_object_not_found" }); return; }
+    response.json({ object });
+  } catch (error) {
+    if (error instanceof Error && error.message === "object_already_rejected") {
+      response.status(409).json({ error: "object_already_rejected" }); return;
+    }
+    console.error("Object review failed:", error);
+    response.status(500).json({ error: "object_review_failed" });
+  }
+});
+
+app.get("/sessions/:code/environment/objects", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const playerToken =
+    request.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+    request.header("x-player-token");
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (!session.environmentId) {
+    response.status(409).json({ error: "environment_not_initialized" });
+    return;
+  }
+
+  response.json({
+    objects: listEnvironmentObjectsForSession(session.environmentId, session.code),
+  });
+});
+
 app.post("/sessions/:code/environment/objects", (request, response) => {
   const session = getSession(request.params.code);
 
@@ -879,7 +1086,7 @@ app.get("/sessions/:code/game/anchor", (request, response) => {
   });
 });
 
-app.post("/sessions/:code/game/anchor/answer", (request, response) => {
+app.post("/sessions/:code/game/anchor/answer", async (request, response) => {
   const session = getSession(request.params.code);
 
   if (!session) {
@@ -887,7 +1094,7 @@ app.post("/sessions/:code/game/anchor/answer", (request, response) => {
     return;
   }
 
-  const { playerId, playerToken, objectRef } = request.body ?? {};
+  const { playerId, playerToken, objectRef, observation } = request.body ?? {};
 
   if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
     response.status(401).json({ error: "invalid_player_credentials" });
@@ -936,19 +1143,140 @@ app.post("/sessions/:code/game/anchor/answer", (request, response) => {
     return;
   }
 
+  if (
+    typeof observation !== "string" ||
+    observation.trim().length < 15 ||
+    observation.length > 2000
+  ) {
+    response.status(400).json({ error: "invalid_observation" });
+    return;
+  }
+
+  // Evaluate the player's observation before attempting anchor resolution.
+  // The Architect proposes an interpretation; it cannot mutate game state.
+  let architectDecision;
+
+  try {
+    const architect = new ArchitectDecisionService(
+      createAiProvider({
+        provider: "ollama",
+        ollamaModel: process.env.OLLAMA_MODEL ?? "gemma3:4b",
+        ollamaTimeoutMs: 45_000,
+      }),
+    );
+
+    const selectedObject = resolved.objects.find(
+      (object) => object.ref === objectRef,
+    );
+
+    architectDecision = await architect.evaluate({
+      sessionCode: session.code,
+      environmentId: session.environmentId,
+      action: {
+        type: "text",
+        text:
+          "I am examining the confirmed object " +
+          (selectedObject?.name ?? objectRef) +
+          " (reference: " + objectRef + "). " +
+          "My field observation: " + observation.trim() +
+          ". Evaluate whether this is meaningful physical evidence. " +
+          "Do not assume I discovered anything I did not describe.",
+      },
+    });
+  } catch (error) {
+    console.error("Architect investigation failed:", error);
+    response.status(503).json({ error: "architect_unavailable" });
+    return;
+  }
+
+  if (
+    architectDecision.outcome !== "accepted"
+  ) {
+    const investigation = {
+      playerId,
+      objectRef,
+      observation: observation.trim(),
+      createdAt: Date.now(),
+      correct: false,
+    };
+
+    state.investigations = [
+      ...(state.investigations ?? []),
+      investigation,
+    ];
+
+    saveGameState(state);
+
+    response.json({
+      correct: false,
+      narration:
+        architectDecision.narration +
+        (architectDecision.evidenceRequest
+          ? " " + architectDecision.evidenceRequest.instruction
+          : ""),
+      investigation,
+      game: {
+        phase: state.phase,
+        completedInteractions: state.completedInteractions,
+      },
+    });
+    return;
+  }
+
   const result = investigateAnchor(
     state,
     resolved.puzzle,
     objectRef,
+    architectDecision.outcome === "accepted",
   );
 
+  const investigation = {
+    playerId,
+    objectRef,
+    observation: observation.trim(),
+    createdAt: Date.now(),
+    correct: result.correct,
+  };
+
+  result.state.investigations = [
+    ...(result.state.investigations ?? []),
+    investigation,
+  ];
+
   if (result.correct) {
-    saveGameState(result.state);
+    const missionId = "investigate-signal-" + playerId;
+    const mission = result.state.missions?.find(
+      (entry) => entry.id === missionId,
+    );
+
+    const nextState = mission
+      ? completeMission(result.state, missionId, playerId)
+      : result.state;
+
+    saveGameState(nextState);
+
+    response.json({
+      correct: true,
+      narration: architectDecision.narration + " " + result.narration,
+      investigation,
+      pointsAwarded: mission ? mission.points : 0,
+      score: nextState.players?.find(
+        (player) => player.playerId === playerId,
+      )?.score ?? 0,
+      game: {
+        phase: nextState.phase,
+        completedInteractions: nextState.completedInteractions,
+      },
+    });
+    return;
   }
+
+  saveGameState(result.state);
 
   response.json({
     correct: result.correct,
-    narration: result.narration,
+    narration: architectDecision.narration + " " + result.narration,
+    investigation,
     game: {
       phase: result.state.phase,
       completedInteractions: result.state.completedInteractions,
@@ -1199,6 +1527,417 @@ app.post("/sessions/:code/game/reconstruction/answer", (request, response) => {
  * Read-only. Does not initialize or advance gameplay.
  * Requires an authenticated Lens player.
  */
+
+const actTwoInteractions = lastWitnessInteractions.filter(
+  (interaction) => interaction.phase === "contradiction",
+);
+
+app.get("/sessions/:code/game/contradiction", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer /i, "");
+
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+  if (session.phase !== "playing" || !state || state.phase !== "contradiction") {
+    response.status(409).json({ error: "contradiction_not_active" });
+    return;
+  }
+
+  const completed = state.completedInteractions;
+
+  response.json({
+    steps: actTwoInteractions.map((interaction) => ({
+      ...interaction,
+      completed: completed.includes(interaction.id),
+      available: interaction.requires.every((id) => completed.includes(id)),
+    })),
+    statements: completed.includes("collect-testimonies")
+      ? contradictionPuzzle.statements
+      : [],
+    puzzle: completed.includes("reconstruct-timeline")
+      ? {
+          prompt: contradictionPuzzle.prompt,
+          statements: contradictionPuzzle.statements,
+        }
+      : null,
+  });
+});
+
+app.post("/sessions/:code/game/contradiction/step", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, interactionId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+  if (session.phase !== "playing" || !state || state.phase !== "contradiction") {
+    response.status(409).json({ error: "contradiction_not_active" });
+    return;
+  }
+
+  const interaction = actTwoInteractions.find((item) => item.id === interactionId);
+  if (!interaction) {
+    response.status(400).json({ error: "invalid_interaction" });
+    return;
+  }
+
+  if (state.completedInteractions.includes(interactionId)) {
+    response.status(409).json({ error: "interaction_already_completed" });
+    return;
+  }
+
+  if (!interaction.requires.every((id) => state.completedInteractions.includes(id))) {
+    response.status(409).json({ error: "interaction_prerequisite_missing" });
+    return;
+  }
+
+  const nextState = completeInteraction(state, interactionId);
+  saveGameState(nextState);
+
+  response.json({
+    completedInteractions: nextState.completedInteractions,
+  });
+});
+
+app.post("/sessions/:code/game/contradiction/answer", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, statementId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+  if (
+    session.phase !== "playing" ||
+    !state ||
+    state.phase !== "contradiction" ||
+    !state.completedInteractions.includes("reconstruct-timeline")
+  ) {
+    response.status(409).json({ error: "contradiction_not_ready" });
+    return;
+  }
+
+  if (
+    typeof statementId !== "string" ||
+    !contradictionPuzzle.statements.some((item) => item.id === statementId)
+  ) {
+    response.status(400).json({ error: "invalid_statement" });
+    return;
+  }
+
+  const result = submitContradictionAnswer(state, statementId);
+  if (result.correct) saveGameState(result.state);
+
+  response.json({
+    correct: result.correct,
+    narration: result.narration,
+    game: {
+      phase: result.state.phase,
+      completedObjectives: result.state.completedObjectives,
+      completedInteractions: result.state.completedInteractions,
+    },
+  });
+});
+
+
+const actThreeInteractions = lastWitnessInteractions.filter(
+  (interaction) => interaction.phase === "revelation",
+);
+
+app.get("/sessions/:code/game/revelation", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer /i, "");
+
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (session.phase !== "playing" || !state || state.phase !== "revelation") {
+    response.status(409).json({ error: "revelation_not_active" });
+    return;
+  }
+
+  const completed = state.completedInteractions;
+
+  response.json({
+    steps: actThreeInteractions.map((interaction) => ({
+      ...interaction,
+      completed: completed.includes(interaction.id),
+      available: interaction.requires.every((id) => completed.includes(id)),
+    })),
+    archive: completed.includes("inspect-archive")
+      ? missingWitnessPuzzle.evidence
+      : null,
+    puzzle: completed.includes("decode-testimony")
+      ? {
+          prompt: missingWitnessPuzzle.prompt,
+          choices: missingWitnessPuzzle.choices,
+        }
+      : null,
+  });
+});
+
+app.post("/sessions/:code/game/revelation/step", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, interactionId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (session.phase !== "playing" || !state || state.phase !== "revelation") {
+    response.status(409).json({ error: "revelation_not_active" });
+    return;
+  }
+
+  const interaction = actThreeInteractions.find(
+    (item) => item.id === interactionId,
+  );
+
+  if (!interaction) {
+    response.status(400).json({ error: "invalid_interaction" });
+    return;
+  }
+
+  if (state.completedInteractions.includes(interactionId)) {
+    response.status(409).json({ error: "interaction_already_completed" });
+    return;
+  }
+
+  if (!interaction.requires.every(
+    (id) => state.completedInteractions.includes(id),
+  )) {
+    response.status(409).json({ error: "interaction_prerequisite_missing" });
+    return;
+  }
+
+  const nextState = completeInteraction(state, interactionId);
+  saveGameState(nextState);
+
+  response.json({
+    completedInteractions: nextState.completedInteractions,
+  });
+});
+
+app.post("/sessions/:code/game/revelation/answer", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, choiceId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (
+    session.phase !== "playing" ||
+    !state ||
+    state.phase !== "revelation" ||
+    !state.completedInteractions.includes("decode-testimony")
+  ) {
+    response.status(409).json({ error: "revelation_not_ready" });
+    return;
+  }
+
+  if (
+    typeof choiceId !== "string" ||
+    !missingWitnessPuzzle.choices.some((choice) => choice.id === choiceId)
+  ) {
+    response.status(400).json({ error: "invalid_choice" });
+    return;
+  }
+
+  const result = submitMissingWitnessAnswer(state, choiceId);
+
+  if (result.correct) {
+    saveGameState(result.state);
+  }
+
+  response.json({
+    correct: result.correct,
+    narration: result.narration,
+    game: {
+      phase: result.state.phase,
+      completedObjectives: result.state.completedObjectives,
+      completedInteractions: result.state.completedInteractions,
+      discoveredEvidence: result.state.discoveredEvidence,
+    },
+  });
+});
+
+app.post("/sessions/:code/game/resolution/answer", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, ending } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (
+    session.phase !== "playing" ||
+    !state ||
+    state.phase !== "resolution"
+  ) {
+    response.status(409).json({ error: "resolution_not_ready" });
+    return;
+  }
+
+  if (
+    ending !== "preservation" &&
+    ending !== "fracture" &&
+    ending !== "reconciliation"
+  ) {
+    response.status(400).json({ error: "invalid_ending" });
+    return;
+  }
+
+  if (
+    ending === "reconciliation" &&
+    !state.discoveredEvidence.includes("missing-testimony")
+  ) {
+    response.status(409).json({ error: "missing_testimony_required" });
+    return;
+  }
+
+  const nextState = advanceGame(state, {
+    type: "choose_ending",
+    ending,
+  });
+
+  saveGameState(nextState);
+
+  response.json({
+    game: {
+      phase: nextState.phase,
+      ending: nextState.ending,
+      completedObjectives: nextState.completedObjectives,
+      completedInteractions: nextState.completedInteractions,
+      discoveredEvidence: nextState.discoveredEvidence,
+    },
+  });
+});
+
+/**
+ * Read-only adventure state for a registered Fire TV.
+ * Does not expose player credentials or mutate gameplay.
+ */
+app.get("/sessions/:code/threshold/game", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const deviceId = request.header("x-device-id");
+
+  if (
+    !deviceId ||
+    !session.thresholds.some(
+      (threshold) => threshold.deviceId === deviceId,
+    )
+  ) {
+    response.status(401).json({
+      error: "invalid_threshold_credentials",
+    });
+    return;
+  }
+
+  if (session.phase !== "playing" && session.phase !== "results") {
+    response.status(409).json({ error: "game_not_available" });
+    return;
+  }
+
+  const gameState = loadGameState(session.code);
+
+  if (!gameState) {
+    response.status(404).json({ error: "game_not_initialized" });
+    return;
+  }
+
+  response.json({
+    scores: [...(gameState.players ?? [])].sort(
+      (a, b) => b.score - a.score,
+    ),
+    events: gameState.tvEvents ?? [],
+    playerNames: Object.fromEntries(
+      session.players.map((player) => [player.id, player.name]),
+    ),
+    game: {
+      phase: gameState.phase,
+      completedObjectives: gameState.completedObjectives,
+      completedInteractions: gameState.completedInteractions,
+      discoveredEvidence: gameState.discoveredEvidence,
+      ending: gameState.ending,
+    },
+    adventure: {
+      id: lastWitnessBlueprint.id,
+      title: lastWitnessBlueprint.title,
+      objectives: lastWitnessBlueprint.objectives,
+    },
+  });
+});
+
 app.get("/sessions/:code/game", (request, response) => {
   const session = getSession(request.params.code);
 
@@ -1261,6 +2000,287 @@ app.get("/sessions/:code/game", (request, response) => {
       title: lastWitnessBlueprint.title,
       objectives: lastWitnessBlueprint.objectives,
     },
+  });
+});
+
+
+/**
+ * Submit fresh photographic evidence for a physical mission.
+ * The local vision model proposes acceptance; server-side mission
+ * state controls scoring and prevents duplicate awards.
+ */
+app.post(
+  "/sessions/:code/game/missions/:missionId/evidence",
+  evidenceImageUpload,
+  async (request, response) => {
+    const sessionCode = request.params.code;
+    if (typeof sessionCode !== "string") {
+      response.status(400).json({ error: "invalid_session_code" });
+      return;
+    }
+    const session = getSession(sessionCode);
+
+    if (!session) {
+      response.status(404).json({ error: "session_not_found" });
+      return;
+    }
+
+    const playerId = request.header("x-player-id");
+    const playerToken =
+      request.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+      request.header("x-player-token");
+
+    if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+      response.status(401).json({ error: "invalid_player_credentials" });
+      return;
+    }
+
+    if (session.phase !== "playing") {
+      response.status(409).json({ error: "game_not_active" });
+      return;
+    }
+
+    const state = loadGameState(session.code);
+
+    if (!state) {
+      response.status(404).json({ error: "game_not_initialized" });
+      return;
+    }
+
+    const missionId = request.params.missionId;
+    const mission = state.missions?.find(
+      (item) => item.id === missionId,
+    );
+
+    if (
+      !mission ||
+      mission.id !== "physical-arrangement-" + playerId ||
+      !mission.assignedPlayerIds.includes(playerId!) ||
+      mission.status === "completed" ||
+      mission.status === "failed"
+    ) {
+      response.status(409).json({ error: "physical_mission_unavailable" });
+      return;
+    }
+
+    if (!request.file) {
+      response.status(400).json({ error: "image_required" });
+      return;
+    }
+
+    const mimeType = detectImageType(request.file.buffer);
+
+    if (!mimeType) {
+      response.status(400).json({ error: "unsupported_image_format" });
+      return;
+    }
+
+    const provider = createAiProvider({
+      provider: "ollama",
+      ollamaModel: "gemma3:4b",
+      ollamaTimeoutMs: 120_000,
+    });
+
+    if (!provider.analyzeImage) {
+      response.status(503).json({ error: "vision_provider_unavailable" });
+      return;
+    }
+
+    let verdict: { accepted: boolean; feedback: string };
+
+    try {
+      const result = await provider.analyzeImage(
+        request.file.buffer,
+        [
+          "Evaluate this photograph as evidence for a physical game objective.",
+          "Objective: three distinct, safe household objects are arranged",
+          "in a clearly visible line from smallest to largest.",
+          "Judge only what is visibly supported by the photograph.",
+          "Do not infer hidden objects, unseen actions, or the player's intent.",
+          "If the arrangement is unclear, partially obscured, or cannot be",
+          "reliably evaluated, reject it and explain what needs improvement.",
+          "Return JSON only with this exact schema:",
+          '{"accepted": boolean, "feedback": "brief actionable explanation"}',
+        ].join(" "),
+        {
+          model: "gemma3:4b",
+          systemPrompt:
+            "You are a cautious visual evidence evaluator. " +
+            "Never claim to see details that are not visible. " +
+            "When uncertain, reject the evidence.",
+        },
+      );
+
+      const parsed = JSON.parse(result.text);
+
+      if (
+        typeof parsed.accepted !== "boolean" ||
+        typeof parsed.feedback !== "string"
+      ) {
+        throw new Error("Invalid vision verdict schema");
+      }
+
+      verdict = {
+        accepted: parsed.accepted,
+        feedback: parsed.feedback.slice(0, 500),
+      };
+    } catch (error) {
+      console.error("Physical evidence verification failed:", error);
+      response.status(503).json({
+        error: "evidence_verification_unavailable",
+      });
+      return;
+    }
+
+    if (!verdict.accepted) {
+      response.status(422).json({
+        accepted: false,
+        feedback: verdict.feedback,
+      });
+      return;
+    }
+
+    // Reload immediately before awarding points. Never trust a score or
+    // completion claim supplied by the Lens client.
+    const current = loadGameState(session.code);
+    const currentMission = current?.missions?.find(
+      (item) => item.id === missionId,
+    );
+
+    if (
+      !current ||
+      !currentMission ||
+      currentMission.status === "completed" ||
+      currentMission.status === "failed"
+    ) {
+      response.status(409).json({ error: "mission_already_resolved" });
+      return;
+    }
+
+    try {
+      const updated = completeMission(current, currentMission.id, playerId!);
+      saveGameState({
+        ...updated,
+        discoveredEvidence: [
+          ...new Set([
+            ...updated.discoveredEvidence,
+            "verified-physical-arrangement-" + playerId,
+          ]),
+        ],
+        tvEvents: [
+          ...(updated.tvEvents ?? []),
+          {
+            id: "physical-evidence-" + missionId,
+            type: "reveal",
+            message:
+              "The Architect has verified a physical reconstruction. " +
+              "An operative has earned " + mission.points + " points.",
+            createdAt: Date.now(),
+          },
+        ],
+      });
+
+      const score = updated.players?.find(
+        (player) => player.playerId === playerId,
+      )?.score ?? 0;
+
+      response.json({
+        accepted: true,
+        feedback: verdict.feedback,
+        pointsAwarded: mission.points,
+        score,
+        missionId,
+      });
+    } catch (error) {
+      console.error("Physical mission completion failed:", error);
+      response.status(409).json({ error: "mission_completion_conflict" });
+    }
+  },
+);
+
+/**
+ * Private missions for an authenticated Lens player.
+ */
+app.get("/sessions/:code/game/missions", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\\s+/i, "");
+
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing" && session.phase !== "results") {
+    response.status(409).json({ error: "game_not_available" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state) {
+    response.status(404).json({ error: "game_not_initialized" });
+    return;
+  }
+
+  const missions = (state.missions ?? []).filter(
+    (mission) =>
+      !mission.private || mission.assignedPlayerIds.includes(playerId!),
+  );
+
+  const score = (state.players ?? []).find(
+    (player) => player.playerId === playerId,
+  )?.score ?? 0;
+
+  response.json({ missions, score });
+});
+
+/**
+ * Public scores and shared events for a registered Fire TV.
+ */
+app.get("/sessions/:code/threshold/missions", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const deviceId = request.header("x-device-id");
+
+  if (
+    !deviceId ||
+    !session.thresholds.some((threshold) => threshold.deviceId === deviceId)
+  ) {
+    response.status(401).json({ error: "invalid_threshold_device" });
+    return;
+  }
+
+  if (session.phase !== "playing" && session.phase !== "results") {
+    response.status(409).json({ error: "game_not_available" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state) {
+    response.status(404).json({ error: "game_not_initialized" });
+    return;
+  }
+
+  const scores = [...(state.players ?? [])].sort(
+    (a, b) => b.score - a.score,
+  );
+
+  response.json({
+    scores,
+    events: state.tvEvents ?? [],
   });
 });
 
@@ -1455,7 +2475,33 @@ app.post(
       return;
     }
 
+    if (group.status === "completed" || group.status === "analyzing") {
+      response.json({ group });
+      return;
+    }
+
+    if (group.status === "failed") {
+      if (session.environmentId) {
+        void analyzeCalibration(
+          session.code,
+          session.environmentId,
+          group.id,
+        );
+      }
+
+      response.json({ group });
+      return;
+    }
+
     if (group.status === "uploaded") {
+      if (session.environmentId) {
+        void analyzeCalibration(
+          session.code,
+          session.environmentId,
+          group.id,
+        );
+      }
+
       response.json({ group });
       return;
     }
@@ -1477,6 +2523,14 @@ app.post(
     }
 
     response.json({ group: finalized });
+
+  if (session.environmentId) {
+    void analyzeCalibration(
+      session.code,
+      session.environmentId,
+      finalized.id,
+    );
+  }
   }
 );
 
