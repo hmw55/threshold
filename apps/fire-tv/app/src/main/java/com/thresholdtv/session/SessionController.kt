@@ -1,4 +1,3 @@
-
 package com.thresholdtv.session
 
 import android.content.Context
@@ -19,6 +18,15 @@ class SessionController(
     )
 
     private val handler = Handler(Looper.getMainLooper())
+
+    private val preferences = context.applicationContext.getSharedPreferences(
+        "threshold_session",
+        Context.MODE_PRIVATE
+    )
+
+    private companion object {
+        const val ACTIVE_EXPEDITION_CODE = "active_expedition_code"
+    }
 
     private var active = false
     private var leaving = false
@@ -80,7 +88,27 @@ class SessionController(
         client.joinExpedition(expeditionCode)
     }
 
+    fun hasSavedExpedition(): Boolean =
+        preferences.getString(ACTIVE_EXPEDITION_CODE, null) != null
+
+    fun restorePreviousExpedition(): Boolean {
+        val previousCode = preferences.getString(
+            ACTIVE_EXPEDITION_CODE,
+            null
+        ) ?: return false
+
+        connect(
+            operation = {
+                client.reconnectExpedition(previousCode)
+            },
+            clearSavedCodeOnFailure = true
+        )
+
+        return true
+    }
+
     private fun connect(
+        clearSavedCodeOnFailure: Boolean = false,
         operation: () -> ThresholdConnection
     ) {
         stop()
@@ -99,6 +127,10 @@ class SessionController(
                     code = connection.session.code
                     zone = connection.threshold.zoneName
 
+                    preferences.edit()
+                        .putString(ACTIVE_EXPEDITION_CODE, connection.session.code)
+                        .apply()
+
                     onUpdate(connection.session, zone.orEmpty())
                     handler.post(poll)
                 }
@@ -108,6 +140,16 @@ class SessionController(
                 handler.post {
                     if (!active || generation != currentGeneration) {
                         return@post
+                    }
+
+                    if (
+                        clearSavedCodeOnFailure &&
+                        e is SessionException &&
+                        e.statusCode in listOf(404, 409, 410)
+                    ) {
+                        preferences.edit()
+                            .remove(ACTIVE_EXPEDITION_CODE)
+                            .apply()
                     }
 
                     active = false
@@ -301,6 +343,11 @@ class SessionController(
                     if (generation != currentGeneration) return@post
 
                     stop()
+
+                    preferences.edit()
+                        .remove(ACTIVE_EXPEDITION_CODE)
+                        .apply()
+
                     onSuccess()
                 }
             } catch (e: Exception) {

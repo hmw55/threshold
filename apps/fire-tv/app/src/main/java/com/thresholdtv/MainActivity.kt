@@ -32,9 +32,11 @@ class MainActivity : Activity() {
     private var showingJoin = false
     private var connecting = false
     private var leaving = false
+    private var restoring = false
     private var advancing = false
     private var returningToLobby = false
     private var restarting = false
+
 
     private var sessionCode: String? = null
     private var connectedThresholds: List<ConnectedThreshold> = emptyList()
@@ -78,7 +80,17 @@ class MainActivity : Activity() {
 
         expedition = ExpeditionScreen(this)
 
-        showHome()
+        if (sessions.hasSavedExpedition()) {
+            restoring = true
+            connecting = true
+            state = ThresholdState.AwaitingPlayers
+
+            showLobby()
+            sessions.restorePreviousExpedition()
+        } else {
+            showHome()
+        }
+
     }
 
     private fun updateScreenAwake(keepAwake: Boolean) {
@@ -127,15 +139,20 @@ class MainActivity : Activity() {
         session: ExpeditionSession,
         zone: String
     ) {
-        connecting = false
-
-        if (state == ThresholdState.Idle && !showingJoin) {
+        if (state == ThresholdState.Idle && !showingJoin && !restoring) {
             return
         }
+
+        connecting = false
+        restoring = false
 
         if (showingJoin) {
             showingJoin = false
             join.deactivate()
+            state = ThresholdState.AwaitingPlayers
+        }
+
+        if (state == ThresholdState.Idle) {
             state = ThresholdState.AwaitingPlayers
         }
 
@@ -178,6 +195,7 @@ class MainActivity : Activity() {
 
     private fun onSessionError(message: String) {
         connecting = false
+        restoring = false
 
         if (showingJoin) {
             join.showError(message)
@@ -187,6 +205,7 @@ class MainActivity : Activity() {
         if (state == ThresholdState.AwaitingPlayers) {
             reset()
             showHome()
+
             android.widget.Toast.makeText(
                 this,
                 message,
@@ -475,9 +494,11 @@ class MainActivity : Activity() {
         connecting = false
         showingJoin = false
         leaving = false
+        restoring = false
         advancing = false
         returningToLobby = false
         restarting = false
+
         lobby.setLeaving(false)
         state = ThresholdState.Idle
     }
