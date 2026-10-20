@@ -3,6 +3,7 @@ import { JoinScreen } from "./components/JoinScreen";
 import { ConnectedScreen } from "./components/ConnectedScreen";
 import { RoomScanner } from "./components/RoomScanner";
 import { useExpeditionSession } from "./hooks/useExpeditionSession";
+import { InvestigationScreen } from "./components/InvestigationScreen";
 import "./App.css";
 
 function App() {
@@ -21,6 +22,9 @@ function App() {
   }, [isCalibrating]);
 
   const showScanner = isCalibrating && !scannerDismissed;
+
+  const showInvestigation =
+    isConnected && session.phase === "playing";
 
   return (
     <main className="lens">
@@ -60,6 +64,12 @@ function App() {
             playerToken={session.playerToken!}
             thresholds={session.thresholds}
             onClose={() => setScannerDismissed(true)}
+          />
+        ) : showInvestigation ? (
+          <InvestigationScreen
+            sessionCode={session.sessionCode}
+            playerId={session.player!.id}
+            playerToken={session.playerToken!}
           />
         ) : (
           <>

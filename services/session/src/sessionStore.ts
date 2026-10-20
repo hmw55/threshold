@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { GameState } from "./game/gameState.js";
 
 const isTest = process.env.NODE_ENV === "test";
 const configuredDatabasePath = process.env.THRESHOLD_DB_PATH;
@@ -24,6 +25,16 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     code TEXT PRIMARY KEY,
     data TEXT NOT NULL
+  );
+`);
+
+database.exec(`
+  CREATE TABLE IF NOT EXISTS game_states (
+    session_code TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    FOREIGN KEY (session_code)
+      REFERENCES sessions(code)
+      ON DELETE CASCADE
   );
 `);
 
@@ -1149,4 +1160,42 @@ database
     database.exec("ROLLBACK");
     throw error;
   }
+}
+
+
+export function saveGameState(state: GameState): void {
+  database.prepare(`
+    INSERT INTO game_states (session_code, data)
+    VALUES (?, ?)
+    ON CONFLICT(session_code)
+    DO UPDATE SET data = excluded.data
+  `).run(
+    state.sessionCode,
+    JSON.stringify(state),
+  );
+}
+
+export function loadGameState(
+  sessionCode: string,
+): GameState | null {
+  const row = database.prepare(`
+    SELECT data
+    FROM game_states
+    WHERE session_code = ?
+  `).get(sessionCode) as
+    | { data: string }
+    | undefined;
+
+  return row
+    ? JSON.parse(row.data) as GameState
+    : null;
+}
+
+export function deleteGameState(
+  sessionCode: string,
+): void {
+  database.prepare(`
+    DELETE FROM game_states
+    WHERE session_code = ?
+  `).run(sessionCode);
 }

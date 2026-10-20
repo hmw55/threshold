@@ -60,6 +60,9 @@ export function RoomScanner({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [scanGroupId, setScanGroupId] = useState<string | null>(null);
+  const [objectName, setObjectName] = useState("");
+  const [confirmedObjects, setConfirmedObjects] = useState<string[]>([]);
+  const [isSavingObject, setIsSavingObject] = useState(false);
   const uploadInProgressRef = useRef(false);
   const [scanTarget, setScanTarget] = useState<ScanTarget | null>(null);
   const [scanGroups, setScanGroups] = useState<ScanGroup[]>([]);
@@ -296,6 +299,56 @@ export function RoomScanner({
     setError(null);
   }
 
+  async function confirmObject() {
+    const name = objectName.trim();
+
+    if (
+      !scanComplete ||
+      !scanGroupId ||
+      name.length < 2 ||
+      isSavingObject
+    ) {
+      return;
+    }
+
+    if (
+      confirmedObjects.some(
+        (existing) => existing.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      setError("OBJECT ALREADY CONFIRMED.");
+      return;
+    }
+
+    setIsSavingObject(true);
+    setError(null);
+
+    try {
+      const result = await sessionClient.registerEnvironmentObject(
+        sessionCode,
+        playerId,
+        playerToken,
+        scanGroupId,
+        name,
+      );
+
+      setConfirmedObjects((previous) => [
+        ...previous,
+        result.object.name,
+      ]);
+
+      setObjectName("");
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `OBJECT REGISTRATION FAILED: ${caught.message}`
+          : "OBJECT REGISTRATION FAILED.",
+      );
+    } finally {
+      setIsSavingObject(false);
+    }
+  }
+
   async function finishScan() {
     if (
       !scanTarget ||
@@ -471,7 +524,7 @@ export function RoomScanner({
           className="scanner-exit-button"
           onClick={onClose}
           aria-label="Exit environment scanner"
-          disabled={isUploading}
+          disabled={isUploading || isSavingObject}
         >
           <span aria-hidden="true">←</span>
           EXIT SCANNER
@@ -503,10 +556,12 @@ export function RoomScanner({
             setCameraStatus("initializing");
             setScanGroupId(null);
             setUploadedCount(0);
+            setObjectName("");
+            setConfirmedObjects([]);
             setScanTarget(null);
             setError(null);
           }}
-          disabled={isUploading}
+          disabled={isUploading || isSavingObject}
         >
          {scanComplete ? "SCAN ANOTHER THRESHOLD" : "CHANGE THRESHOLD"}
         </button>
@@ -585,8 +640,49 @@ export function RoomScanner({
         )}
 
         {scanComplete ? (
-          <div className="scanner-hud-confirmation" role="status">
-            ✓ {capturedImages.length} ENVIRONMENT IMAGES SECURED
+          <div className="scanner-hud-actions">
+            <div className="scanner-hud-confirmation" role="status">
+              ✓ {capturedImages.length} ENVIRONMENT IMAGES SECURED
+            </div>
+
+            <label htmlFor="confirmed-object" className="scanner-hud-label">
+              IDENTIFY AN OBJECT IN THIS ENVIRONMENT
+            </label>
+
+            <input
+              id="confirmed-object"
+              type="text"
+              value={objectName}
+              onChange={(event) => setObjectName(event.target.value)}
+              placeholder="e.g. bookshelf, lamp, coffee table"
+              maxLength={100}
+              disabled={isSavingObject}
+              style={{
+                width: "100%",
+                padding: "12px",
+                fontSize: "16px",
+                color: "#fff",
+                background: "#14191d",
+                border: "1px solid #82949a",
+                borderRadius: "4px",
+              }}
+            />
+
+            <button
+              type="button"
+              className="scanner-hud-primary"
+              onClick={() => void confirmObject()}
+              disabled={isSavingObject || objectName.trim().length < 2}
+            >
+              {isSavingObject ? "REGISTERING..." : "CONFIRM OBJECT"}
+            </button>
+
+            {confirmedObjects.length > 0 && (
+              <p className="scanner-hud-label" role="status">
+                {confirmedObjects.length} OBJECTS CONFIRMED:{" "}
+                {confirmedObjects.join(", ")}
+              </p>
+            )}
           </div>
         ) : previewUrl ? (
           <div className="scanner-hud-actions">
@@ -629,7 +725,7 @@ export function RoomScanner({
                 type="button"
                 className="scanner-hud-secondary"
                 onClick={() => void finishScan()}
-                disabled={isUploading}
+                disabled={isUploading || isSavingObject}
               >
                 {isUploading
                   ? uploadedCount === capturedImages.length

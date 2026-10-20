@@ -17,11 +17,17 @@ import {
   getScanGroup,
   listScanGroups,
   createScanImage,
+  createEnvironment,
+  createEnvironmentObject,
+  createEnvironmentObservation,
   countScanImages,
+  loadGameState,
   listScanImages,
   finalizeScanGroup,
+  saveGameState,
   claimScanGroup,
   deleteSessionScanGroups,
+  deleteGameState,
   resetSessionScanGroupsForReuse,
 } from "./sessionStore.js";
 import cors from "cors";
@@ -32,6 +38,19 @@ import {
   saveImage,
   removeImage,
 } from "./imageStorage.js";
+import { lastWitnessBlueprint } from "./game/lastWitnessBlueprint.js";
+import { createInitialGameState } from "./game/gameState.js";
+import { advanceGame } from "./game/gameEngine.js";
+import { resolveAnchorPuzzle } from "./game/resolveAnchorPuzzle.js";
+import { investigateAnchor } from "./game/anchorInvestigation.js";
+import {
+  recoverTransmission,
+  transmissionFragments,
+} from "./game/transmissionRecovery.js";
+import {
+  reconstructSignal,
+  signalFragments,
+} from "./game/signalReconstruction.js";
 
 type SessionStatus = "awaiting_players" | "ready";
 
@@ -60,6 +79,7 @@ interface Session {
   thresholds: Threshold[];
   status: SessionStatus;
   phase: ExpeditionPhase;
+  environmentId: string | null;
 }
 
 const MAX_THRESHOLDS = 4;
@@ -255,12 +275,22 @@ app.post("/sessions", (request, response) => {
     code = generateSessionCode();
   }
 
+  const environmentId = randomUUID();
+
+  createEnvironment({
+    id: environmentId,
+    name: `Expedition ${code}`,
+    source: "scanned",
+    createdAt: new Date().toISOString(),
+  });
+
   const session: Session = {
     code,
     players: [],
     thresholds: [],
     status: "awaiting_players",
     phase: "lobby",
+    environmentId,
   };
 
   if (suppliedDeviceId !== undefined) {
@@ -554,6 +584,19 @@ app.post("/sessions/:code/advance", (request, response) => {
   session.phase = nextPhase;
   saveSession(session.code, session);
 
+  if (nextPhase === "playing") {
+    const initialGame = createInitialGameState(
+      session.code,
+      "last-witness-v1",
+    );
+
+    const startedGame = advanceGame(initialGame, {
+      type: "start",
+    });
+
+    saveGameState(startedGame);
+  }
+
   response.json({ session });
 });
 
@@ -687,12 +730,537 @@ app.post("/sessions/:code/restart", async (request, response) => {
   // Preserve players, registered TVs, and the expedition code.
   session.phase = "lobby";
   updateSessionStatus(session);
+  // A restarted expedition must begin with a fresh mystery.
+  deleteGameState(session.code);
   saveSession(session.code, session);
 
   response.status(200).json({
     session,
     restarted: true,
     mode,
+  });
+});
+
+app.post("/sessions/:code/environment/objects", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, name, scanGroupId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "calibrating") {
+    response.status(409).json({ error: "calibration_not_active" });
+    return;
+  }
+
+  if (
+    typeof name !== "string" ||
+    name.trim().length < 2 ||
+    name.trim().length > 100
+  ) {
+    response.status(400).json({ error: "invalid_object_name" });
+    return;
+  }
+
+  if (!session.environmentId) {
+    response.status(409).json({ error: "environment_not_initialized" });
+    return;
+  }
+
+  const group = typeof scanGroupId === "string"
+    ? getScanGroup(scanGroupId)
+    : null;
+
+  if (!group || group.sessionCode !== session.code) {
+    response.status(404).json({ error: "scan_group_not_found" });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const objectId = randomUUID();
+
+  const object = createEnvironmentObject({
+    id: objectId,
+    environmentId: session.environmentId,
+    parentObjectId: null,
+    name: name.trim(),
+    category: "physical_object",
+    description: null,
+    location: group.label,
+    recognitionStatus: "confirmed",
+    requiresCloserScan: false,
+    createdAt: now,
+  });
+
+  createEnvironmentObservation({
+    id: randomUUID(),
+    environmentId: session.environmentId,
+    objectId,
+    sessionCode: session.code,
+    scanGroupId: group.id,
+    observedName: object.name,
+    observedCategory: object.category,
+    observedDescription: null,
+    observedLocation: object.location,
+    recognitionStatus: "confirmed",
+    observedAt: now,
+  });
+
+  response.status(201).json({
+    object: {
+      id: object.id,
+      name: object.name,
+      category: object.category,
+      location: object.location,
+    },
+  });
+});
+
+app.get("/sessions/:code/game/anchor", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const playerToken =
+    request.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+    request.header("x-player-token");
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (!session.environmentId) {
+    response.status(409).json({ error: "environment_not_initialized" });
+    return;
+  }
+
+  const resolved = resolveAnchorPuzzle(
+    session.environmentId,
+    session.code,
+  );
+
+  if (!resolved) {
+    response.status(409).json({ error: "no_confirmed_objects" });
+    return;
+  }
+
+  response.json({
+    puzzle: {
+      id: resolved.puzzle.puzzleId,
+      clue: resolved.puzzle.clue,
+      completed: state.completedInteractions.includes("inspect-anchor"),
+    },
+    objects: resolved.objects,
+  });
+});
+
+app.post("/sessions/:code/game/anchor/answer", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, objectRef } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (state.completedInteractions.includes("inspect-anchor")) {
+    response.status(409).json({ error: "anchor_already_completed" });
+    return;
+  }
+
+  if (typeof objectRef !== "string" || !objectRef) {
+    response.status(400).json({ error: "invalid_object_ref" });
+    return;
+  }
+
+  if (!session.environmentId) {
+    response.status(409).json({ error: "environment_not_initialized" });
+    return;
+  }
+
+  const resolved = resolveAnchorPuzzle(
+    session.environmentId,
+    session.code,
+  );
+
+  if (!resolved) {
+    response.status(409).json({ error: "no_confirmed_objects" });
+    return;
+  }
+
+  if (!resolved.objects.some((object) => object.ref === objectRef)) {
+    response.status(400).json({ error: "unknown_object_ref" });
+    return;
+  }
+
+  const result = investigateAnchor(
+    state,
+    resolved.puzzle,
+    objectRef,
+  );
+
+  if (result.correct) {
+    saveGameState(result.state);
+  }
+
+  response.json({
+    correct: result.correct,
+    narration: result.narration,
+    game: {
+      phase: result.state.phase,
+      completedInteractions: result.state.completedInteractions,
+    },
+  });
+});
+
+/**
+ * Retrieve intercepted transmission fragments.
+ *
+ * Available only after the anchor has been identified.
+ * Never exposes the correct fragment ID.
+ */
+app.get("/sessions/:code/game/transmission", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const playerToken =
+    request.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+    request.header("x-player-token");
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (!state.completedInteractions.includes("inspect-anchor")) {
+    response.status(409).json({ error: "anchor_not_completed" });
+    return;
+  }
+
+  response.json({
+    fragments: transmissionFragments,
+    completed: state.completedInteractions.includes(
+      "recover-transmission",
+    ),
+  });
+});
+
+/**
+ * Submit a transmission fragment for recovery.
+ */
+app.post("/sessions/:code/game/transmission/answer", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, fragmentId } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (!state.completedInteractions.includes("inspect-anchor")) {
+    response.status(409).json({ error: "anchor_not_completed" });
+    return;
+  }
+
+  if (state.completedInteractions.includes("recover-transmission")) {
+    response.status(409).json({ error: "transmission_already_completed" });
+    return;
+  }
+
+  if (
+    typeof fragmentId !== "string" ||
+    !transmissionFragments.some((fragment) => fragment.id === fragmentId)
+  ) {
+    response.status(400).json({ error: "invalid_fragment_id" });
+    return;
+  }
+
+  const result = recoverTransmission(state, fragmentId);
+
+  if (result.correct) {
+    saveGameState(result.state);
+  }
+
+  response.json({
+    correct: result.correct,
+    narration: result.narration,
+    game: {
+      phase: result.state.phase,
+      completedInteractions: result.state.completedInteractions,
+    },
+  });
+});
+
+/**
+ * Retrieve signal fragments after transmission recovery.
+ */
+app.get("/sessions/:code/game/reconstruction", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const playerToken =
+    request.header("authorization")?.replace(/^Bearer\s+/i, "") ??
+    request.header("x-player-token");
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (!state.completedInteractions.includes("recover-transmission")) {
+    response.status(409).json({ error: "transmission_not_recovered" });
+    return;
+  }
+
+  response.json({
+    fragments: signalFragments,
+    completed: state.completedInteractions.includes(
+      "reconstruct-signal",
+    ),
+  });
+});
+
+/**
+ * Submit an ordered sequence of signal fragments.
+ */
+app.post("/sessions/:code/game/reconstruction/answer", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  const { playerId, playerToken, order } = request.body ?? {};
+
+  if (!authenticateExpeditionPlayer(session, playerId, playerToken)) {
+    response.status(401).json({ error: "invalid_player_credentials" });
+    return;
+  }
+
+  if (session.phase !== "playing") {
+    response.status(409).json({ error: "game_not_active" });
+    return;
+  }
+
+  const state = loadGameState(session.code);
+
+  if (!state || state.phase !== "investigation") {
+    response.status(409).json({ error: "investigation_not_active" });
+    return;
+  }
+
+  if (!state.completedInteractions.includes("recover-transmission")) {
+    response.status(409).json({ error: "transmission_not_recovered" });
+    return;
+  }
+
+  if (state.completedInteractions.includes("reconstruct-signal")) {
+    response.status(409).json({ error: "reconstruction_already_completed" });
+    return;
+  }
+
+  const validIds = new Set(signalFragments.map((fragment) => fragment.id));
+
+  if (
+    !Array.isArray(order) ||
+    order.length !== signalFragments.length ||
+    order.some(
+      (id: unknown) => typeof id !== "string" || !validIds.has(id),
+    ) ||
+    new Set(order).size !== signalFragments.length
+  ) {
+    response.status(400).json({ error: "invalid_fragment_sequence" });
+    return;
+  }
+
+  const result = reconstructSignal(state, order);
+
+  const nextState = result.correct
+    ? advanceGame(result.state, {
+        type: "complete_objective",
+        objectiveId: "first-signal",
+      })
+    : result.state;
+
+  if (result.correct) {
+    saveGameState(nextState);
+  }
+
+  response.json({
+    correct: result.correct,
+    narration: result.narration,
+    game: {
+      phase: nextState.phase,
+      completedObjectives: nextState.completedObjectives,
+      completedInteractions: nextState.completedInteractions,
+    },
+  });
+});
+
+/**
+ * Return the current Last Witness game state.
+ *
+ * Read-only. Does not initialize or advance gameplay.
+ * Requires an authenticated Lens player.
+ */
+app.get("/sessions/:code/game", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({
+      error: "session_not_found",
+    });
+    return;
+  }
+
+  const playerId = request.header("x-player-id");
+  const authorization = request.header("authorization");
+
+  const playerToken = authorization?.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : undefined;
+
+  if (
+    !authenticateExpeditionPlayer(
+      session,
+      playerId,
+      playerToken,
+    )
+  ) {
+    response.status(401).json({
+      error: "invalid_player_credentials",
+    });
+    return;
+  }
+
+  if (
+    session.phase !== "playing" &&
+    session.phase !== "results"
+  ) {
+    response.status(409).json({
+      error: "game_not_available",
+    });
+    return;
+  }
+
+  const gameState = loadGameState(session.code);
+
+  if (!gameState) {
+    response.status(404).json({
+      error: "game_not_initialized",
+    });
+    return;
+  }
+
+  response.json({
+    game: {
+      phase: gameState.phase,
+      completedObjectives: gameState.completedObjectives,
+      completedInteractions: gameState.completedInteractions,
+      discoveredEvidence: gameState.discoveredEvidence,
+      ending: gameState.ending,
+    },
+    adventure: {
+      id: lastWitnessBlueprint.id,
+      title: lastWitnessBlueprint.title,
+      objectives: lastWitnessBlueprint.objectives,
+    },
   });
 });
 
