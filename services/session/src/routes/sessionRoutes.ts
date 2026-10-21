@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import type { RouteContext, Session, ExpeditionPhase, Player } from "../app.js";
 import type { GameMission } from "../game/gameState.js";
+import { publicLastWitnessCase } from "../game/lastWitnessCase.js";
 import type { FieldChoice, FieldAction } from "../game/fieldExpedition.js";
 
 export function registerSessionRoutes(app: Express, ctx: RouteContext): void {
@@ -81,6 +82,36 @@ app.get("/sessions/:code", (request, response) => {
   }
 
   response.json(session);
+});
+
+// Public, spoiler-safe briefing available before gameplay starts.
+app.get("/sessions/:code/opening", (request, response) => {
+  const session = getSession(request.params.code);
+
+  if (!session) {
+    response.status(404).json({ error: "session_not_found" });
+    return;
+  }
+
+  if (!["ready", "playing", "results"].includes(session.phase)) {
+    response.status(409).json({ error: "opening_not_available" });
+    return;
+  }
+
+  const mystery = startFieldExpedition(session.code).mystery;
+
+  if (!mystery) {
+    response.status(500).json({ error: "mystery_not_available" });
+    return;
+  }
+
+  const publicCase = publicLastWitnessCase(mystery);
+
+  response.json({
+    family: publicCase.family,
+    title: publicCase.title,
+    objective: publicCase.objective,
+  });
 });
 
 // Register an additional Fire TV with an existing Expedition.

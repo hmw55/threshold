@@ -82,7 +82,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   }, [cameraActive]);
   useEffect(() => () => { if (capturedUrl) URL.revokeObjectURL(capturedUrl); }, [capturedUrl]);
   async function submit() {
-    if (busyRef.current || !view || view.submitted) return;
+    if (busyRef.current || !view) return;
     busyRef.current = true; setBusy(true); setError("");
     try {
       const body = new FormData();
@@ -171,9 +171,25 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     <div className="field-meter"><div style={{width: `${100 * view.progress / view.total}%`}} /></div>
     <h1>{view.title}</h1>
     <blockquote className="field-transmission">{view.transmission}</blockquote>
-    {view.privateInstruction && <aside className="field-private"><strong>PRIVATE LENS DIRECTIVE</strong><p>{view.privateInstruction}</p></aside>}
+    {view.privateInstruction && (
+      <details className="field-private field-directive">
+        <summary>
+          <span>PRIVATE DIRECTIVE // YOU ARE THE OBSERVER</span>
+          <span className="field-directive-toggle" aria-hidden="true">+</span>
+        </summary>
+        <div className="field-directive-body">
+          <p>{view.privateInstruction}</p>
+        </div>
+      </details>
+    )}
     {view.allegiance && view.allegiance.accepted === null && <aside className="field-allegiance"><strong>ARCHITECT OFFER // PRIVATE</strong><p>{view.allegiance.offer === "deceive" ? "Mislead the shared record once. If another operative exposes the inconsistency, they gain the reward instead." : "Cooperate with the Architect's evidence trail for extra points."}</p><div><button type="button" onClick={() => void answerAllegiance(true)}>ACCEPT</button><button type="button" onClick={() => void answerAllegiance(false)}>REJECT</button></div></aside>}
-    {view.stage === "complete" ? <div className="field-ending">
+    {view.allegiance && view.allegiance.accepted === null
+      ? <section className="field-offer-gate" aria-live="polite">
+          <span className="field-offer-gate-signal">AWAITING OPERATIVE DECISION</span>
+          <p>The Architect is waiting for your answer.</p>
+          <p className="field-offer-gate-hint">Your investigation will resume after you decide.</p>
+        </section>
+      : view.stage === "complete" ? <div className="field-ending">
       <h2>THE ROOM IS STILL HERE.</h2>
       <p>FINAL DECISION // {view.ending?.toUpperCase()}</p>
       <p>You chose what the Architect may carry away. Every observation came from a real witness in a real place.</p>
@@ -198,7 +214,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} onChange={() => setChoice("erase")}/> Erase the Architect's copy</label>
         <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
-      </div> : view.submitted ? <p className="field-wait">EVIDENCE RECEIVED // Waiting for another perspective ({view.received}/{view.required})</p> : <div className="field-controls">
+      </div> : view.puzzle && view.puzzle.solvedBy.length === 0 ? null : <div className="field-controls">
         {view.objects.length === 0 ? <p role="alert">No confirmed objects yet. Use “Discover another real object or room” above to confirm one before continuing.</p> : <>
           <label htmlFor="field-object">REAL OBJECT TO INVESTIGATE</label>
           <select id="field-object" value={objectId || view.target?.id || ""} onChange={e => setObjectId(e.target.value)}>

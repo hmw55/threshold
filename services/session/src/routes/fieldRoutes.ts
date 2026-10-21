@@ -930,6 +930,7 @@ app.post("/sessions/:code/field/observation", evidenceImageUpload, async (reques
   if (session.phase !== "playing") { response.status(409).json({ error: "game_not_active" }); return; }
   const ctx = fieldContext(session.code);
   if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  if (!session.environmentId) { response.status(409).json({ error: "environment_not_ready" }); return; }
   const object = ctx.objects.find(item => item.id === request.body?.objectId);
   if (!object) { response.status(400).json({ error: "object_not_confirmed" }); return; }
   const field = ensureField(ctx.game);
@@ -942,7 +943,7 @@ app.post("/sessions/:code/field/observation", evidenceImageUpload, async (reques
   if (typeof observation !== "string" || observation.trim().length < 12 || observation.length > 1200) {
     response.status(400).json({ error: "invalid_observation" }); return;
   }
-  if (field.stage === "complete" || field.stage === "verdict" || field.records.some(r => r.stage === field.stage && r.playerId === playerId)) {
+  if (field.stage !== "survey" || field.records.some(r => r.stage === "survey" && r.playerId === playerId)) {
     response.status(409).json({ error: "observation_unavailable" }); return;
   }
   const mime = request.file ? detectImageType(request.file.buffer) : null;
@@ -951,7 +952,7 @@ app.post("/sessions/:code/field/observation", evidenceImageUpload, async (reques
   try {
     if (request.file && mime) imageKey = await saveImage(request.file.buffer, session.code, `field-${field.revision}`, mime);
     const architectDecision = await evaluateFieldAction(session, playerId!, object, action, observation.trim(), imageKey);
-    const updated = submitFieldObservation(field, { playerId: playerId!, object, observation, imageKey, action, detail }, session.players);
+    const updated = submitFieldObservation(field, { playerId: playerId!, object, observation, imageKey, action, detail }, session.players, Date.now(), confirmedObjects(listEnvironmentObjectsForSession(session.environmentId, session.code)));
     const directed = architectDecision?.narration
       ? { ...updated, architectLog: [...updated.architectLog, architectDecision.narration] }
       : updated;

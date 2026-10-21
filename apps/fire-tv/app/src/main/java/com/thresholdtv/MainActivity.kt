@@ -16,6 +16,7 @@ import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
 import com.thresholdtv.ui.screens.CalibrationScreen
 import com.thresholdtv.ui.screens.ExpeditionScreen
+import com.thresholdtv.ui.screens.OpeningBriefingScreen
 import com.thresholdtv.ui.screens.LobbyScreen
 import android.view.WindowManager
 
@@ -26,6 +27,7 @@ class MainActivity : Activity() {
     private lateinit var lobby: LobbyScreen
     private lateinit var calibration: CalibrationScreen
     private lateinit var expedition: ExpeditionScreen
+    private lateinit var openingScreen: OpeningBriefingScreen
     private lateinit var sessions: SessionController
 
     private var state: ThresholdState = ThresholdState.Idle
@@ -42,6 +44,9 @@ class MainActivity : Activity() {
     private var connectedThresholds: List<ConnectedThreshold> = emptyList()
     private var playerNames: List<String> = emptyList()
     private var localZone: String = ""
+
+    private var openingBriefing: org.json.JSONObject? = null
+    private var openingRequestedFor: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +84,7 @@ class MainActivity : Activity() {
         )
 
         expedition = ExpeditionScreen(this)
+        openingScreen = OpeningBriefingScreen(this, ::advance)
 
         if (sessions.hasSavedExpedition()) {
             restoring = true
@@ -329,6 +335,25 @@ class MainActivity : Activity() {
                 }
             }
         }
+        if (state is ThresholdState.Playing) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN ->
+                    return expedition.moveMonitor(0)
+
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT ->
+                    return expedition.moveMonitor(1)
+
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER ->
+                    return expedition.expandMonitor()
+
+                KeyEvent.KEYCODE_BACK ->
+                    if (expedition.collapseMonitor()) return true
+            }
+        }
+
         if (
             keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
             keyCode == KeyEvent.KEYCODE_ENTER
@@ -484,14 +509,44 @@ class MainActivity : Activity() {
                 calibration.start()
             }
 
-            is ThresholdState.ExpeditionReady ->
-                showState(
-                    "ENVIRONMENT ACCEPTED",
-                    "${current.sectorCount} sector.\n" +
-                        "${current.playerCount} player.\n" +
-                        "Architect connection established.",
-                    "PRESS SELECT TO BEGIN EXPEDITION"
-                )
+            is ThresholdState.ExpeditionReady -> {
+                val briefing = openingBriefing
+                val family = briefing?.optString("family", "")
+                    ?.takeIf { it.isNotBlank() } ?: "CLASSIFIED"
+                val title = briefing?.optString("title", "")
+                    ?.takeIf { it.isNotBlank() } ?: "AWAITING CASE FILE"
+                val objective = briefing?.optString("objective", "")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Establishing the investigation briefing."
+
+                openingScreen.showCase(family, title, objective)
+
+                if (openingScreen.parent == null) {
+                    setContentView(openingScreen)
+                    openingScreen.activate()
+                }
+
+                val code = sessionCode
+                if (code != null && openingRequestedFor != code) {
+                    openingRequestedFor = code
+                    sessions.getOpeningBriefing(
+                        expeditionCode = code,
+                        onSuccess = { result ->
+                            if (sessionCode == code &&
+                                state is ThresholdState.ExpeditionReady
+                            ) {
+                                openingBriefing = result
+                                renderState()
+                            }
+                        },
+                        onFailure = {
+                            if (sessionCode == code) {
+                                openingRequestedFor = null
+                            }
+                        }
+                    )
+                }
+            }
 
             is ThresholdState.Playing -> {
                 setContentView(expedition)
@@ -545,7 +600,8 @@ class MainActivity : Activity() {
 
     private fun leaveExpedition() {
         if (leaving || connecting) return
-        if (state != ThresholdState.AwaitingPlayers) return
+        if (state != ThresholdState.AwaitingPlayers &&
+            state !is ThresholdState.Results) return
 
         leaving = true
         lobby.setLeaving(true)
@@ -576,6 +632,8 @@ class MainActivity : Activity() {
         calibration.stop()
         sessionCode = null
         latestAdventure = null
+        openingBriefing = null
+        openingRequestedFor = null
         connectedThresholds = emptyList()
         playerNames = emptyList()
         localZone = ""
@@ -594,10 +652,14 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        if (state is ThresholdState.Playing && expedition.collapseMonitor()) {
+            return
+        }
         when {
             showingJoin -> cancelJoin()
 
-            state == ThresholdState.AwaitingPlayers -> {
+            state == ThresholdState.AwaitingPlayers ||
+                state is ThresholdState.Results -> {
                 leaveExpedition()
             }
 

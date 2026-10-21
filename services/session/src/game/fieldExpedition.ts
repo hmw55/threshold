@@ -149,48 +149,117 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
   };
 }
 export function submitFieldObservation(state: FieldState, input: {
-  playerId: string; object: FieldObject; observation: string; imageKey?: string | null; action?: FieldAction; detail?: string | null;
-}, players: FieldPlayer[], now = Date.now()): FieldState {
+  playerId: string; object: FieldObject; observation: string;
+  imageKey?: string | null; action?: FieldAction; detail?: string | null;
+}, players: FieldPlayer[], now = Date.now(), worldObjects: FieldObject[] = []): FieldState {
   if (state.stage === "complete") throw new Error("expedition_complete");
-  if (state.stage === "verdict") throw new Error("vote_required");
+  if (state.stage !== "survey") throw new Error("observation_unavailable");
   if (!players.some(p => p.id === input.playerId)) throw new Error("invalid_player");
-  if (state.records.some(r => r.stage === state.stage && r.playerId === input.playerId)) throw new Error("already_submitted");
+  if (state.records.some(r => r.stage === "survey" && r.playerId === input.playerId)) {
+    throw new Error("already_submitted");
+  }
+
   const observation = input.observation.trim();
   if (observation.length < 12 || observation.length > 1200) throw new Error("invalid_observation");
   const action = input.action ?? "observe";
-  if (["examine", "move", "rotate", "reposition"].includes(action) && !input.imageKey) throw new Error("photo_required_for_physical_action");
-  const record: FieldRecord = { id: `${state.revision}-${input.playerId}`, stage: state.stage, playerId: input.playerId,
-    objectId: input.object.id, objectName: input.object.name, observation, imageKey: input.imageKey ?? null, createdAt: now, action, detail: input.detail?.trim() || null };
+  if (["examine", "move", "rotate", "reposition"].includes(action) && !input.imageKey) {
+    throw new Error("photo_required_for_physical_action");
+  }
+
+  const record: FieldRecord = {
+    id: `${state.revision}-${input.playerId}`,
+    stage: "survey",
+    playerId: input.playerId,
+    objectId: input.object.id,
+    objectName: input.object.name,
+    observation,
+    imageKey: input.imageKey ?? null,
+    createdAt: now,
+    action,
+    detail: input.detail?.trim() || null,
+  };
   const records = [...state.records, record];
-  const count = records.filter(r => r.stage === state.stage).length;
-  const required = Math.max(1, players.length);
-  const next = count >= required ? stages[stages.indexOf(state.stage) + 1] : state.stage;
-  const points = action === "examine" ? 150 : action === "move" || action === "rotate" || action === "reposition" ? 125 : 75;
-  const scoreEvents = [...state.scoreEvents, { playerId: input.playerId, reason: `${action} ${input.object.name}`, points, createdAt: now }];
-  const puzzle = next === "fracture" && !state.puzzle ? buildFieldPuzzle(records, players) : state.puzzle;
-  const architectLog = [...state.architectLog, `${input.object.name} // ${action.toUpperCase()} reported by ${players.find(p => p.id === input.playerId)?.name ?? "operative"}.`];
-  return { ...state, records, stage: next ?? state.stage, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
+  const contributors = new Set(records.filter(r => r.stage === "survey").map(r => r.playerId));
+  const advances = contributors.size >= Math.max(1, players.length);
+  const next: FieldStage = advances ? "fracture" : "survey";
+  const points = action === "examine" ? 150
+    : ["move", "rotate", "reposition"].includes(action) ? 125 : 75;
+  const scoreEvents = [...state.scoreEvents, {
+    playerId: input.playerId,
+    reason: `${action} ${input.object.name}`,
+    points,
+    createdAt: now,
+  }];
+  const puzzle = advances && !state.puzzle ? buildFieldPuzzle(records, players, worldObjects) : state.puzzle;
+  const playerName = players.find(player => player.id === input.playerId)?.name ?? "operative";
+  const architectLog = [...state.architectLog,
+    `${input.object.name} // ${action.toUpperCase()} reported by ${playerName}.`];
+
+  return { ...state, records, stage: next, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
 }
 
-function buildFieldPuzzle(records: FieldRecord[], players: FieldPlayer[]): FieldPuzzle | null {
-  const exchange = records.filter(record => record.stage === "exchange");
-  if (exchange.length === 0) return null;
+function buildFieldPuzzle(records: FieldRecord[], _players: FieldPlayer[], worldObjects: FieldObject[] = []): FieldPuzzle | null {
+  const evidence = records.filter(record => record.stage === "survey");
+  if (evidence.length === 0) return null;
+
   const counts = new Map<string, number>();
-  for (const record of exchange) counts.set(record.objectId, (counts.get(record.objectId) ?? 0) + 1);
+  for (const record of evidence) {
+    counts.set(record.objectId, (counts.get(record.objectId) ?? 0) + 1);
+  }
+
   const answerId = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
   if (!answerId) return null;
-  const choices = [...new Map(exchange.map(record => [record.objectId, { id: record.objectId, label: record.objectName }])).values()];
-  return { id: `shared-anchor-${records.length}`, prompt: `Two witnesses reported the exchange. Which confirmed object is supported by the strongest independent evidence?`, choices, answerId, solvedBy: [] };
+
+  // Choices come from confirmed room objects and verified observations.
+  const labels = new Map(worldObjects.map(object => [object.id, object.name]));
+  const ids = new Set([
+    ...worldObjects.map(object => object.id),
+    ...evidence.map(record => record.objectId),
+  ]);
+  const choices = [...ids].map(id => ({
+    id,
+    label: labels.get(id) ?? evidence.find(record => record.objectId === id)?.objectName ?? id,
+  })).sort((a, b) => a.label.localeCompare(b.label));
+
+  return {
+    id: `shared-anchor-${records.length}`,
+    prompt: "DEDUCTION // Which confirmed object is best supported by the witnesses' observations?",
+    choices,
+    answerId,
+    solvedBy: [],
+  };
 }
 
 export function answerFieldPuzzle(state: FieldState, playerId: string, choiceId: string, now = Date.now()): { state: FieldState; correct: boolean; narration: string } {
   if (!state.puzzle) throw new Error("puzzle_unavailable");
+  if (state.stage !== "fracture") throw new Error("puzzle_unavailable");
   if (state.puzzle.solvedBy.includes(playerId)) throw new Error("puzzle_already_solved");
+
   const correct = choiceId === state.puzzle.answerId;
-  const puzzle = correct ? { ...state.puzzle, solvedBy: [...state.puzzle.solvedBy, playerId] } : state.puzzle;
-  const scoreEvents = correct ? [...state.scoreEvents, { playerId, reason: "solved evidence deduction", points: 250, createdAt: now }] : state.scoreEvents;
-  const architectLog = [...state.architectLog, correct ? "THE ARCHITECT ACCEPTS THE SHARED DEDUCTION." : "THE ARCHITECT MARKS THE DEDUCTION AS UNRESOLVED."];
-  return { state: { ...state, puzzle, scoreEvents, architectLog, revision: state.revision + 1 }, correct, narration: correct ? "The records converge. The object is a shared anchor." : "The records do not support that conclusion yet." };
+  const puzzle = correct
+    ? { ...state.puzzle, solvedBy: [...state.puzzle.solvedBy, playerId] }
+    : state.puzzle;
+  const scoreEvents = correct
+    ? [...state.scoreEvents, { playerId, reason: "solved evidence deduction", points: 250, createdAt: now }]
+    : state.scoreEvents;
+  const architectLog = [...state.architectLog, correct
+    ? "THE ARCHITECT ACCEPTS THE SHARED DEDUCTION."
+    : "THE ARCHITECT MARKS THE DEDUCTION AS UNRESOLVED."];
+
+  return {
+    state: {
+      ...state,
+      puzzle,
+      scoreEvents,
+      architectLog,
+      stage: correct ? "verdict" : state.stage,
+      revision: state.revision + 1,
+    },
+    correct,
+    narration: correct
+      ? "The records converge. The Architect must revise its interpretation."
+      : "The records do not support that conclusion yet.",
+  };
 }
 
 export function answerFieldAllegiance(state: FieldState, playerId: string, accepted: boolean, offer: "cooperate" | "deceive" = "cooperate"): FieldState {

@@ -6,10 +6,49 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.thresholdtv.ui.components.SurveillanceMonitor
+import com.thresholdtv.ui.components.SecurityInterruptionView
+import com.thresholdtv.ui.components.SignalNoiseView
 import com.thresholdtv.ui.ThresholdTheme
 import org.json.JSONObject
 
 class ExpeditionScreen(context: Context) : LinearLayout(context) {
+
+    private val monitors = listOf(
+        SurveillanceMonitor(context, 1, "OPERATIVES"),
+        SurveillanceMonitor(context, 2, "WITNESS RECORDS"),
+        SurveillanceMonitor(context, 3, "ARCHITECT FEED"),
+        SurveillanceMonitor(context, 4, "SYSTEM DIAGNOSTICS")
+    )
+    private var selectedMonitor = 2
+    private var expandedMonitor: Int? = null
+    private val interruption = SecurityInterruptionView(context)
+
+    private val expandedContainer = LinearLayout(context).apply {
+        orientation = VERTICAL
+        visibility = GONE
+    }
+
+    private val surveillanceGrid = LinearLayout(context).apply {
+        orientation = VERTICAL
+        visibility = GONE
+    }
+
+    private fun createMonitorRow(start: Int): LinearLayout =
+        LinearLayout(context).apply {
+            orientation = HORIZONTAL
+
+            for (index in start until start + 2) {
+                addView(
+                    monitors[index],
+                    LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply {
+                        setMargins(6, 6, 6, 6)
+                    }
+                )
+            }
+        }
+
+    private lateinit var legacyPanel: LinearLayout
 
     private val heading = text(42f, ThresholdTheme.Colors.Primary)
     private val subtitle = text(19f, ThresholdTheme.Colors.GlitchCyan)
@@ -36,7 +75,6 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         orientation = VERTICAL
         gravity = Gravity.CENTER_VERTICAL
         setBackgroundColor(ThresholdTheme.Colors.Background)
-        setPadding(72, 54, 72, 54)
 
         val panel = LinearLayout(context).apply {
             orientation = VERTICAL
@@ -47,6 +85,9 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                 cornerRadius = 8f
             }
         }
+
+        legacyPanel = panel
+        panel.visibility = GONE
 
         panel.addView(subtitle)
         panel.addView(heading)
@@ -71,6 +112,76 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
         )
 
+        surveillanceGrid.addView(
+            createMonitorRow(0),
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+        surveillanceGrid.addView(
+            createMonitorRow(2),
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+        addView(
+            surveillanceGrid,
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+        addView(
+            expandedContainer,
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+
+        surveillanceGrid.visibility = VISIBLE
+        refreshMonitorSelection()
+
+        // Keep the original layout intact; the overlay is attached above it.
+        val originalChildren = (0 until childCount).map { getChildAt(it) }
+        val originalParams = originalChildren.map { it.layoutParams }
+        removeAllViews()
+
+        val wrapper = android.widget.FrameLayout(context)
+        val content = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(ThresholdTheme.Colors.Background)
+        }
+
+        originalChildren.forEachIndexed { index, child ->
+            removeView(child)
+            content.addView(child, originalParams[index])
+        }
+
+        wrapper.addView(
+            content,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        val signalOverlay = SignalNoiseView(context, transparent = true)
+        signalOverlay.importantForAccessibility =
+            android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+
+        wrapper.addView(
+            signalOverlay,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        wrapper.addView(
+            interruption,
+            android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        addView(
+            wrapper,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        )
+
+        signalOverlay.start()
         showWaiting()
     }
 
@@ -81,6 +192,14 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             typeface = ThresholdTheme.Typography.Terminal
             setPadding(0, 12, 0, 12)
         }
+
+    fun triggerInterruption(message: String) {
+        interruption.trigger(message)
+    }
+
+    fun stopInterruption() {
+        interruption.stop()
+    }
 
     fun showWaiting() {
         subtitle.text = "ARCHITECT // SIGNAL ACTIVE"
@@ -94,6 +213,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         currentPhase = ""
         terminalChoices = emptyList()
         terminalFeedback = ""
+        refreshGameplayLayout()
     }
 
     fun update(data: JSONObject) {
@@ -183,6 +303,15 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         }
 
         scoreboard.text = scoreLines.joinToString("\n")
+        monitors[0].setContent(scoreLines.drop(1).joinToString("\n"))
+        monitors[1].setContent(evidence.text.toString())
+        monitors[2].setContent(transmission.text.toString())
+        monitors[3].setContent(
+            "SYSTEM // ONLINE\n" +
+            "PHASE // ${phase.uppercase()}\n" +
+            progress.text.toString()
+        )
+
         renderDecision()
         val field = data.optJSONObject("fieldEncounter")
         if (field != null) {
@@ -213,7 +342,17 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             else if (field.optString("stage") == "complete")
                 "FINAL DECISION // " + field.optString("ending").uppercase()
             else "WITNESS REPORTS // ${field.optInt("received")} OF ${field.optInt("required")}"
+
+            monitors[1].setContent(evidence.text.toString())
+            monitors[2].setContent(transmission.text.toString())
+            monitors[3].setContent(
+                "SYSTEM // MONITORING\n" +
+                "ENCOUNTER // ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}\n" +
+                "REPORTS // ${field.optInt("received")} / ${field.optInt("required")}\n" +
+                "SIGNAL // ▂▅▃▇▂▄▆▃"
+            )
             footer.text = "THE ROOM IS THE GAME // CONTINUE ON YOUR LENS"
+            refreshGameplayLayout()
             return
         }
         footer.text = when (phase) {
@@ -224,6 +363,21 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             else "CONTINUE THE INVESTIGATION ON YOUR LENS"
         }
     }
+    private fun refreshGameplayLayout() {
+        val requiresDecision = isChoosingFieldVerdict() ||
+            isChoosingEnding() || isChoosingTerminal()
+
+        if (requiresDecision && expandedMonitor != null) {
+            collapseMonitor()
+        }
+
+        legacyPanel.visibility = if (requiresDecision) VISIBLE else GONE
+        surveillanceGrid.visibility =
+            if (requiresDecision || expandedMonitor != null) GONE else VISIBLE
+        expandedContainer.visibility =
+            if (!requiresDecision && expandedMonitor != null) VISIBLE else GONE
+    }
+
     private fun renderDecision() {
         if (currentPhase != "resolution") {
             decision.text = when {
@@ -250,6 +404,71 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                 }
                 append("\n")
             }
+        }
+    }
+
+    fun moveMonitor(direction: Int): Boolean {
+        if (expandedMonitor != null) return false
+
+        val row = selectedMonitor / 2
+        val col = selectedMonitor % 2
+
+        selectedMonitor = when (direction) {
+            0 -> ((row + 1) % 2) * 2 + col
+            1 -> row * 2 + ((col + 1) % 2)
+            else -> selectedMonitor
+        }
+
+        refreshMonitorSelection()
+        return true
+    }
+
+    fun expandMonitor(): Boolean {
+        if (expandedMonitor != null) return false
+
+        val monitor = monitors[selectedMonitor]
+        val parent = monitor.parent as? LinearLayout ?: return false
+
+        parent.removeView(monitor)
+        expandedContainer.addView(
+            monitor,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        )
+
+        monitor.setExpanded(true)
+        expandedMonitor = selectedMonitor
+        surveillanceGrid.visibility = GONE
+        expandedContainer.visibility = VISIBLE
+        refreshMonitorSelection()
+        return true
+    }
+
+    fun collapseMonitor(): Boolean {
+        val index = expandedMonitor ?: return false
+        val monitor = monitors[index]
+
+        expandedContainer.removeView(monitor)
+
+        val row = surveillanceGrid.getChildAt(index / 2) as LinearLayout
+        row.addView(
+            monitor,
+            index % 2,
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply {
+                setMargins(6, 6, 6, 6)
+            }
+        )
+
+        monitor.setExpanded(false)
+        expandedMonitor = null
+        expandedContainer.visibility = GONE
+        surveillanceGrid.visibility = VISIBLE
+        refreshMonitorSelection()
+        return true
+    }
+
+    private fun refreshMonitorSelection() {
+        monitors.forEachIndexed { index, monitor ->
+            monitor.setMonitorSelected(index == selectedMonitor)
         }
     }
 

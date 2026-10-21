@@ -18,7 +18,8 @@ import kotlin.random.Random
  * Does not handle focus, input, or foreground animations.
  */
 class SignalNoiseView(
-    context: Context
+    context: Context,
+    private val transparent: Boolean = false
 ) : View(context) {
 
     private data class SignalFragment(
@@ -55,9 +56,9 @@ class SignalNoiseView(
         isFocusable = false
         isClickable = false
 
-        setBackgroundColor(
-            ThresholdTheme.Colors.Background
-        )
+        if (!transparent) {
+            setBackgroundColor(ThresholdTheme.Colors.Background)
+        }
     }
 
     fun start() {

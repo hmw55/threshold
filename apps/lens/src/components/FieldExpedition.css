@@ -1,1 +1,140 @@
 .field-panel{color:#e5ecf2;padding:24px 4px 40px;line-height:1.55}.field-eyebrow{color:#60d8e4;font-size:11px;letter-spacing:2px}.field-panel h1{font-size:25px;letter-spacing:2px;line-height:1.25}.field-panel h2{font-size:20px}.field-meter{height:3px;background:#29323b;margin:18px 0}.field-meter div{height:100%;background:#64d8e5;transition:width .5s}.field-transmission{border-left:2px solid #64d8e5;background:#0f1921;margin:18px 0;padding:20px;font-size:17px}.field-private{border:1px solid #ad7b42;background:#211a13;color:#f4c785;padding:16px;margin:18px 0}.field-private strong{font-size:11px;letter-spacing:2px}.field-private p{margin-bottom:0}.field-prompt{font-size:18px;font-weight:600}.field-target{color:#f4c785;font-size:13px}.field-controls{display:flex;flex-direction:column;gap:12px;margin-top:24px}.field-controls label{font-size:12px;letter-spacing:1px;color:#a4dfe8}.field-controls select,.field-controls textarea,.field-controls input[type=file],.field-controls input[type=text],.field-controls input:not([type]){background:#131b23;color:#e7f3f6;border:1px solid #52636f;padding:12px;border-radius:3px;width:100%;font:inherit}.field-controls button,.field-preview button{background:#55c6d4;color:#071017;border:0;padding:14px;font-weight:800;letter-spacing:1px;cursor:pointer}.field-controls button:disabled{opacity:.4;cursor:not-allowed}.field-preview img{max-width:100%;max-height:220px;object-fit:contain;display:block;margin-bottom:8px}.field-error{color:#ff9ba9}.field-allegiance{border:1px solid #b86dce;background:#211427;color:#e6b8f2;padding:16px;margin:18px 0}.field-allegiance button,.field-puzzle button{margin:8px 8px 0 0;padding:10px 14px;background:#d28de4;color:#180d20;border:0;font-weight:700}.field-puzzle{border:1px solid #70c8d8;background:#10222a;padding:18px;margin:18px 0}.field-camera{display:flex;flex-direction:column;gap:10px}.field-camera video{width:100%;max-height:300px;object-fit:cover;background:#030608}.field-feedback,.field-wait{color:#8ce7be}.field-log{border-top:1px solid #35414d;margin-top:28px;padding-top:12px}.field-log summary{cursor:pointer;color:#8cbbc6}.field-log div{border-bottom:1px solid #26333d;padding:10px 0}.field-log p{font-size:13px}.field-ending{border:1px solid #66d6e0;padding:24px;margin:24px 0}.field-controls small{color:#96a8b5}
+
+
+/* Focused Lens hierarchy: persistent directive, one active task. */
+.field-private.field-directive {
+  padding: 0;
+  border-color: #795e91;
+  background: linear-gradient(110deg, #201629, #111820 82%);
+  color: #e5c9f4;
+}
+
+.field-directive > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.field-directive > summary::-webkit-details-marker {
+  display: none;
+}
+
+.field-directive-toggle {
+  flex: 0 0 auto;
+  color: #d28de4;
+  font-size: 20px;
+  transition: transform 160ms ease;
+}
+
+.field-directive[open] .field-directive-toggle {
+  transform: rotate(45deg);
+}
+
+.field-directive-body {
+  padding: 0 16px 12px;
+  border-top: 1px solid #493352;
+}
+
+.field-directive-body p {
+  margin-bottom: 0;
+  line-height: 1.6;
+}
+
+.field-puzzle {
+  box-shadow: inset 3px 0 #70c8d8;
+}
+
+/* Center the Architect offer */
+.field-allegiance {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Center the offer description */
+.field-allegiance p {
+  text-align: center;
+  max-width: 480px;
+}
+
+/* Center ACCEPT / REJECT buttons */
+.field-allegiance > div {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Center the decision box */
+.field-controls:has(input[name="verdict"]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.field-controls:has(input[name="verdict"]) label {
+  width: min(100%, 420px);
+  text-align: left;
+}
+
+.field-controls:has(input[name="verdict"]) button {
+  align-self: center;
+}
+
+.field-controls {
+  margin-top: 18px;
+}
+
+@media (max-width: 480px) {
+  .field-directive > summary {
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+}
+
+
+/* The Architect's offer temporarily suspends the active investigation. */
+.field-offer-gate {
+  margin-top: 22px;
+  padding: 22px 18px;
+  border-left: 3px solid #c98ce4;
+  background: linear-gradient(115deg, #211528, #111820);
+  color: #e5c9f4;
+  animation: offer-gate-in 240ms ease-out both;
+}
+
+.field-offer-gate-signal {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #d99ceB;
+}
+
+.field-offer-gate p {
+  line-height: 1.6;
+}
+
+.field-offer-gate-hint {
+  margin-bottom: 0;
+  color: #a9a0b3;
+  font-size: 13px;
+}
+
+@keyframes offer-gate-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-offer-gate { animation: none; }
+}

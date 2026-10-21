@@ -36,13 +36,31 @@ describe("field encounter API",()=>{
     const id = created.body.object.id as string;
     await request(app).post(`/sessions/${code}/field/observation`).set(headers)
       .field("objectId",id).field("observation","I rotated the object to inspect its back.").field("action","rotate").expect(409);
-    for(let i=0;i<4;i++){
-      const before = await request(app).get(`/sessions/${code}/field`).set(headers).expect(200);
-      expect(before.body.privateInstruction).toContain("PRIVATE DIRECTIVE");
-      const result = await request(app).post(`/sessions/${code}/field/observation`).set(headers)
-        .field("objectId",id).field("observation",`The dresser was physically inspected in encounter ${i}.`).expect(200);
-      expect(result.body.view.progress).toBe(before.body.progress+1);
+    const before = await request(app).get(`/sessions/${code}/field`).set(headers).expect(200);
+    expect(before.body.privateInstruction).toContain("PRIVATE DIRECTIVE");
+
+    const observation = await request(app).post(`/sessions/${code}/field/observation`).set(headers)
+      .field("objectId",id)
+      .field("observation","The dresser has a visible mark along the bottom drawer.")
+      .expect(200);
+
+    expect(observation.body.view.stage).toBe("fracture");
+    expect(observation.body.view.puzzle.choices.length).toBeGreaterThan(0);
+
+    // Exercise the public puzzle endpoint using only its published choices.
+    // Incorrect deductions remain retryable; a correct one unlocks the verdict.
+    let solved = false;
+    for (const item of observation.body.view.puzzle.choices) {
+      const answer = await request(app).post(`/sessions/${code}/field/puzzle`).set(headers)
+        .send({choiceId:item.id}).expect(200);
+      if (answer.body.correct) {
+        solved = true;
+        expect(answer.body.view.stage).toBe("verdict");
+        break;
+      }
     }
+    expect(solved).toBe(true);
+
     await request(app).post(`/sessions/${code}/threshold/field/verdict`).set("x-device-id","tv-1").send({choice:"release"}).expect(200);
     const voted = await request(app).post(`/sessions/${code}/field/verdict`).set(headers)
       .send({choice:"release"}).expect(200);

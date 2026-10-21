@@ -167,6 +167,38 @@ class SessionController(
         }.start()
     }
 
+    fun getOpeningBriefing(
+        expeditionCode: String,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: () -> Unit
+    ) {
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                val briefing = client.getOpeningBriefing(expeditionCode)
+
+                handler.post {
+                    if (active && !leaving && generation == currentGeneration &&
+                        code == expeditionCode
+                    ) {
+                        onSuccess(briefing)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("Threshold", "Opening briefing unavailable", e)
+
+                handler.post {
+                    if (active && generation == currentGeneration &&
+                        code == expeditionCode
+                    ) {
+                        onFailure()
+                    }
+                }
+            }
+        }.start()
+    }
+
     fun submitTerminalDecision(
         choice: Int,
         onSuccess: (org.json.JSONObject) -> Unit,

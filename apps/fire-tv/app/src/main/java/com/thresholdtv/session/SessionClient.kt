@@ -106,6 +106,12 @@ class SessionClient(
         )
 
 
+    fun getOpeningBriefing(code: String): JSONObject =
+        request(
+            method = "GET",
+            path = "/sessions/${normalizeCode(code)}/opening"
+        )
+
     fun getAdventureState(code: String): JSONObject {
         return request(
             method = "GET",
