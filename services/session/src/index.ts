@@ -7,8 +7,11 @@ const PORT = Number(process.env.PORT ?? 3001);
 let developmentLock: Server | undefined;
 
 try {
-  if (process.env.NODE_ENV !== "production" &&
-      process.env.NODE_ENV !== "test") {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NODE_ENV !== "test" &&
+    process.env.THRESHOLD_LOCK_HELD_BY_LAUNCHER !== "1"
+  ) {
     developmentLock = await acquireDevelopmentLock();
   }
 

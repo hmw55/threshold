@@ -23,6 +23,7 @@ export function ContradictionScreen({
   const [selectedWitness, setSelectedWitness] = useState<string | null>(null);
   const [reviewedWitnesses, setReviewedWitnesses] = useState<string[]>([]);
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
+  const [timelineFeedback, setTimelineFeedback] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [narration, setNarration] = useState<string | null>(null);
@@ -145,6 +146,10 @@ export function ContradictionScreen({
     { id: "signal", label: "Two witnesses independently confirm hearing it." },
     { id: "silence", label: "One witness remembers the silence afterward." },
   ];
+  const expectedTimeline = timelineEvents.map((event) => event.id);
+  const timelineIsCorrect = selectedEvents.every(
+    (id, index) => id === expectedTimeline[index],
+  );
 
   return (
     <section className="terminal-panel connected-panel investigation-screen">
@@ -265,7 +270,8 @@ export function ContradictionScreen({
             </p>
             <p className="investigation-message">
               Review the sequence of verified events.
-              Select each piece of evidence to assemble the timeline.
+              Reconstruct the events in chronological order. The Architect will
+              reject an inconsistent sequence.
             </p>
           </div>
           <div className="investigation-objects">
@@ -276,7 +282,10 @@ export function ContradictionScreen({
                 className="investigation-object"
                 disabled={selectedEvents.includes(event.id)}
                 onClick={() =>
-                  setSelectedEvents((current) => [...current, event.id])
+                  {
+                    setTimelineFeedback(null);
+                    setSelectedEvents((current) => [...current, event.id]);
+                  }
                 }
               >
                 <span className="investigation-fragment-content">
@@ -300,14 +309,16 @@ export function ContradictionScreen({
               ))}
             </ol>
           </div>
+          {timelineFeedback && <p role="alert" className="investigation-message">{timelineFeedback}</p>}
           <div className="investigation-actions">
             <button
               type="button"
               className="investigation-action"
               disabled={submitting || selectedEvents.length === 0}
-              onClick={() =>
-                setSelectedEvents((current) => current.slice(0, -1))
-              }
+              onClick={() => {
+                setTimelineFeedback(null);
+                setSelectedEvents((current) => current.slice(0, -1));
+              }}
             >
               UNDO LAST
             </button>
@@ -315,7 +326,14 @@ export function ContradictionScreen({
               type="button"
               className="investigation-action investigation-action-primary"
               disabled={submitting || selectedEvents.length !== timelineEvents.length}
-              onClick={() => void completeStep("reconstruct-timeline")}
+              onClick={() => {
+                if (!timelineIsCorrect) {
+                  setTimelineFeedback("SEQUENCE REJECTED. Compare the timestamp, the witnessed signal, and what followed. Rearrange the events.");
+                  return;
+                }
+                setTimelineFeedback(null);
+                void completeStep("reconstruct-timeline");
+              }}
             >
               CONFIRM TIMELINE
             </button>

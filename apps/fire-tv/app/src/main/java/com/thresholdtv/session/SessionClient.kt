@@ -106,6 +106,12 @@ class SessionClient(
         )
 
 
+    fun getOpeningBriefing(code: String): JSONObject =
+        request(
+            method = "GET",
+            path = "/sessions/${normalizeCode(code)}/opening"
+        )
+
     fun getAdventureState(code: String): JSONObject {
         return request(
             method = "GET",
@@ -113,6 +119,30 @@ class SessionClient(
             headers = mapOf("x-device-id" to deviceId)
         )
     }
+
+    fun submitTerminalDecision(code: String, choice: Int): JSONObject =
+        request(
+            method = "POST",
+            path = "/sessions/${normalizeCode(code)}/threshold/game/decision",
+            payload = JSONObject().put("choice", choice),
+            headers = mapOf("x-device-id" to deviceId)
+        )
+
+    fun chooseEnding(code: String, ending: String): JSONObject =
+        request(
+            method = "POST",
+            path = "/sessions/${normalizeCode(code)}/threshold/resolution/answer",
+            payload = JSONObject().put("ending", ending),
+            headers = mapOf("x-device-id" to deviceId)
+        )
+
+    fun submitFieldVerdict(code: String, choice: String): JSONObject =
+        request(
+            method = "POST",
+            path = "/sessions/${normalizeCode(code)}/threshold/field/verdict",
+            payload = JSONObject().put("choice", choice),
+            headers = mapOf("x-device-id" to deviceId)
+        )
 
     fun returnToLobby(code: String): ExpeditionSession =
         parseSession(

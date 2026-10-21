@@ -268,6 +268,7 @@ export const gameClient = {
     playerId: string,
     playerToken: string,
     interactionId: string,
+    observation?: string,
   ): Promise<RevelationStepResult> {
     return request(
       `/sessions/${normalizeCode(code)}/game/revelation/step`,
@@ -277,6 +278,7 @@ export const gameClient = {
           playerId,
           playerToken,
           interactionId,
+          observation,
         }),
       },
     );

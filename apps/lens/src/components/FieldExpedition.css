@@ -1,0 +1,613 @@
+.field-panel{color:#e5ecf2;padding:24px 4px 40px;line-height:1.55}.field-eyebrow{color:#60d8e4;font-size:11px;letter-spacing:2px}.field-panel h1{font-size:25px;letter-spacing:2px;line-height:1.25}.field-panel h2{font-size:20px}.field-meter{height:3px;background:#29323b;margin:18px 0}.field-meter div{height:100%;background:#64d8e5;transition:width .5s}.field-transmission{border-left:2px solid #64d8e5;background:#0f1921;margin:18px 0;padding:20px;font-size:17px}.field-private{border:1px solid #ad7b42;background:#211a13;color:#f4c785;padding:16px;margin:18px 0}.field-private strong{font-size:11px;letter-spacing:2px}.field-private p{margin-bottom:0}.field-prompt{font-size:18px;font-weight:600}.field-target{color:#f4c785;font-size:13px}.field-controls{display:flex;flex-direction:column;gap:12px;margin-top:24px}.field-controls label{font-size:12px;letter-spacing:1px;color:#a4dfe8}.field-controls select,.field-controls textarea,.field-controls input[type=file],.field-controls input[type=text],.field-controls input:not([type]){background:#131b23;color:#e7f3f6;border:1px solid #52636f;padding:12px;border-radius:3px;width:100%;font:inherit}.field-controls button,.field-preview button{background:#55c6d4;color:#071017;border:0;padding:14px;font-weight:800;letter-spacing:1px;cursor:pointer}.field-controls button:disabled{opacity:.4;cursor:not-allowed}.field-preview img{max-width:100%;max-height:220px;object-fit:contain;display:block;margin-bottom:8px}.field-error{color:#ff9ba9}.field-allegiance{border:1px solid #b86dce;background:#211427;color:#e6b8f2;padding:16px;margin:18px 0}.field-allegiance button,.field-puzzle button{margin:8px 8px 0 0;padding:10px 14px;background:#d28de4;color:#180d20;border:0;font-weight:700}.field-puzzle{border:1px solid #70c8d8;background:#10222a;padding:18px;margin:18px 0}.field-camera{display:flex;flex-direction:column;gap:10px}.field-camera video{width:100%;max-height:300px;object-fit:cover;background:#030608}.field-feedback,.field-wait{color:#8ce7be}.field-log{border-top:1px solid #35414d;margin-top:28px;padding-top:12px}.field-log summary{cursor:pointer;color:#8cbbc6}.field-log div{border-bottom:1px solid #26333d;padding:10px 0}.field-log p{font-size:13px}.field-ending{border:1px solid #66d6e0;padding:24px;margin:24px 0}.field-controls small{color:#96a8b5}
+
+
+/* Focused Lens hierarchy: persistent directive, one active task. */
+.field-private.field-directive {
+  padding: 0;
+  border-color: #795e91;
+  background: linear-gradient(110deg, #201629, #111820 82%);
+  color: #e5c9f4;
+}
+
+.field-directive > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px 16px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.field-directive > summary::-webkit-details-marker {
+  display: none;
+}
+
+.field-directive-toggle {
+  flex: 0 0 auto;
+  color: #d28de4;
+  font-size: 20px;
+  transition: transform 160ms ease;
+}
+
+.field-directive[open] .field-directive-toggle {
+  transform: rotate(45deg);
+}
+
+.field-directive-body {
+  padding: 0 16px 12px;
+  border-top: 1px solid #493352;
+}
+
+.field-directive-body p {
+  margin-bottom: 0;
+  line-height: 1.6;
+}
+
+.field-puzzle {
+  box-shadow: inset 3px 0 #70c8d8;
+}
+
+/* Center the Architect offer */
+.field-allegiance {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Center the offer description */
+.field-allegiance p {
+  text-align: center;
+  max-width: 480px;
+}
+
+/* Center ACCEPT / REJECT buttons */
+.field-allegiance > div {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Center the decision box */
+.field-controls:has(input[name="verdict"]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.field-controls:has(input[name="verdict"]) label {
+  width: min(100%, 420px);
+  text-align: left;
+}
+
+.field-controls:has(input[name="verdict"]) button {
+  align-self: center;
+}
+
+.field-controls {
+  margin-top: 18px;
+}
+
+@media (max-width: 480px) {
+  .field-directive > summary {
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+}
+
+
+/* The Architect's offer temporarily suspends the active investigation. */
+.field-offer-gate {
+  margin-top: 22px;
+  padding: 22px 18px;
+  border-left: 3px solid #c98ce4;
+  background: linear-gradient(115deg, #211528, #111820);
+  color: #e5c9f4;
+  animation: offer-gate-in 240ms ease-out both;
+}
+
+.field-offer-gate-signal {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #d99ceB;
+}
+
+.field-offer-gate p {
+  line-height: 1.6;
+}
+
+.field-offer-gate-hint {
+  margin-bottom: 0;
+  color: #a9a0b3;
+  font-size: 13px;
+}
+
+@keyframes offer-gate-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field-offer-gate { animation: none; }
+}
+
+/* Threshold Lens // cinematic investigation instrument */
+.field-panel {
+  --lens-cyan: #8ae3ec;
+  --lens-muted: #94acba;
+  --lens-border: #304957;
+  color: #e9f2f5;
+  padding: 20px 12px 48px;
+  background:
+    radial-gradient(ellipse at 90% 0%, #14313b 0%, transparent 45%),
+    linear-gradient(180deg, #0c151d, #080e14);
+  border: 1px solid #243a46;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px #0006, inset 0 1px #ffffff12;
+}
+
+.field-eyebrow {
+  display: flex;
+  align-items: center;
+  color: var(--lens-cyan);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 2.2px;
+}
+
+.field-eyebrow::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: #8ae3ec;
+  box-shadow: 0 0 12px #8ae3ecaa;
+}
+
+.field-panel h1 {
+  margin: 20px 0 10px;
+  font-size: clamp(23px, 5vw, 32px);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.field-meter {
+  height: 4px;
+  margin: 16px 0;
+  background: #243743;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.field-meter div {
+  background: linear-gradient(90deg, #367e92, #a0f4f5);
+  box-shadow: 0 0 12px #7de1eb;
+}
+
+.field-transmission {
+  position: relative;
+  margin: 20px 0;
+  padding: 38px 18px 20px;
+  border: 1px solid #315667;
+  border-left: 3px solid var(--lens-cyan);
+  border-radius: 8px;
+  background: linear-gradient(130deg, #142b35, #101820);
+  box-shadow: inset 0 1px #ffffff0a;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.field-transmission::before {
+  content: "◉  ARCHITECT TRANSMISSION // LIVE";
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  color: var(--lens-cyan);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+}
+
+.field-private.field-directive {
+  border-radius: 8px;
+  border-color: #866746;
+  background: linear-gradient(120deg, #251e1c, #151b22);
+  color: #f2d2a6;
+}
+
+.field-directive-body {
+  border-top-color: #5c4737;
+}
+
+.field-directive-toggle {
+  color: #f2c48b;
+}
+
+.field-prompt {
+  margin: 24px 0 12px;
+  padding-left: 12px;
+  border-left: 3px solid var(--lens-cyan);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.field-target {
+  padding: 12px;
+  background: #18252c;
+  border: 1px dashed #55717d;
+  border-radius: 6px;
+  color: #e4c38f;
+}
+
+.field-controls {
+  gap: 14px;
+  padding: 18px 14px;
+  background: #111d26;
+  border: 1px solid var(--lens-border);
+  border-radius: 10px;
+}
+
+.field-controls label {
+  color: #9ad6e0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+
+.field-controls select,
+.field-controls textarea,
+.field-controls input[type=text],
+.field-controls input:not([type]) {
+  box-sizing: border-box;
+  background: #0a141c;
+  border: 1px solid #3a5664;
+  border-radius: 7px;
+  color: #effaff;
+  min-height: 46px;
+  outline: none;
+}
+
+.field-controls textarea:focus,
+.field-controls select:focus,
+.field-controls input:focus {
+  border-color: #8ae3ec;
+  box-shadow: 0 0 0 2px #8ae3ec20;
+}
+
+.field-controls button {
+  min-height: 48px;
+  border-radius: 7px;
+  background: linear-gradient(120deg, #9ae9ee, #5fc4d2);
+  color: #091b24;
+  font-weight: 900;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.field-controls button:not(:disabled):active {
+  transform: scale(.985);
+}
+
+.field-controls button:disabled {
+  opacity: .42;
+  filter: grayscale(.4);
+}
+
+.field-log {
+  padding: 14px;
+  border: 1px solid #2e4350;
+  border-radius: 8px;
+  background: #111c25;
+}
+
+.field-log summary {
+  color: #9fcad4;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .7px;
+}
+
+.field-puzzle {
+  border-radius: 10px;
+  border-color: #3d8290;
+  background: linear-gradient(145deg, #142d36, #101820);
+}
+
+.field-puzzle p {
+  white-space: pre-line;
+  line-height: 1.7;
+}
+
+.field-puzzle button {
+  border-radius: 6px;
+  background: #8ae3ec;
+  color: #081920;
+}
+
+.field-allegiance,
+.field-offer-gate {
+  border-radius: 9px;
+  box-shadow: 0 0 28px #aa57c018;
+}
+
+.field-ending {
+  border-radius: 10px;
+  background: linear-gradient(140deg, #152c32, #10151d);
+}
+
+@media (max-width: 480px) {
+  .field-panel { padding: 18px 10px 32px; }
+  .field-controls { padding: 16px 12px; }
+}
+
+/* Last Witness — mobile forensic accusation interface */
+.field-accusation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px 16px;
+  overflow-wrap: anywhere;
+}
+
+.field-accusation > strong {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.13em;
+  line-height: 1.5;
+  color: #85d9e7;
+}
+
+.field-accusation > h2 {
+  margin: 0;
+  font-size: clamp(1.3rem, 5vw, 1.8rem);
+  line-height: 1.2;
+  letter-spacing: 0.025em;
+}
+
+.field-accusation > h3 {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  letter-spacing: 0.09em;
+  color: #9ed8e2;
+}
+
+.field-accusation > p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #c2d0d6;
+}
+
+.field-accusation .field-evidence-list,
+.field-accusation .field-suspect-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.field-accusation .field-evidence-card,
+.field-accusation .field-suspect-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(132, 188, 201, 0.28);
+  border-radius: 10px;
+  background: rgba(5, 19, 29, 0.72);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.field-accusation .field-evidence-card > input,
+.field-accusation .field-suspect-card > input {
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+  margin: 2px 0 0;
+  accent-color: #7edce9;
+}
+
+.field-accusation .field-evidence-card > span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-accusation .field-evidence-card strong {
+  display: block;
+  color: #89dce8;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  line-height: 1.4;
+}
+
+.field-accusation .field-evidence-card span span {
+  display: block;
+  color: #e1e9ed;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.field-accusation .field-suspect-card {
+  align-items: center;
+  font-weight: 600;
+  color: #e1e9ed;
+}
+
+.field-accusation .field-evidence-card:has(input:checked),
+.field-accusation .field-suspect-card:has(input:checked) {
+  border-color: #7edce9;
+  background: rgba(29, 91, 106, 0.32);
+}
+
+.field-accusation > button {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: normal;
+}
+
+@media (max-width: 480px) {
+  .field-accusation {
+    padding: 18px 12px;
+  }
+
+  .field-accusation .field-evidence-card,
+  .field-accusation .field-suspect-card {
+    padding: 13px 11px;
+  }
+}
+
+/* Last Witness — mobile forensic accusation interface */
+.field-accusation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px 16px;
+  overflow-wrap: anywhere;
+}
+
+.field-accusation > strong {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.13em;
+  line-height: 1.5;
+  color: #85d9e7;
+}
+
+.field-accusation > h2 {
+  margin: 0;
+  font-size: clamp(1.3rem, 5vw, 1.8rem);
+  line-height: 1.2;
+  letter-spacing: 0.025em;
+}
+
+.field-accusation > h3 {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  letter-spacing: 0.09em;
+  color: #9ed8e2;
+}
+
+.field-accusation > p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #c2d0d6;
+}
+
+.field-accusation .field-evidence-list,
+.field-accusation .field-suspect-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.field-accusation .field-evidence-card,
+.field-accusation .field-suspect-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(132, 188, 201, 0.28);
+  border-radius: 10px;
+  background: rgba(5, 19, 29, 0.72);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.field-accusation .field-evidence-card > input,
+.field-accusation .field-suspect-card > input {
+  flex: 0 0 19px;
+  width: 19px;
+  height: 19px;
+  margin: 2px 0 0;
+  accent-color: #7edce9;
+}
+
+.field-accusation .field-evidence-card > span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-accusation .field-evidence-card strong {
+  display: block;
+  color: #89dce8;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  line-height: 1.4;
+}
+
+.field-accusation .field-evidence-card span span {
+  display: block;
+  color: #e1e9ed;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.field-accusation .field-suspect-card {
+  align-items: center;
+  font-weight: 600;
+  color: #e1e9ed;
+}
+
+.field-accusation .field-evidence-card:has(input:checked),
+.field-accusation .field-suspect-card:has(input:checked) {
+  border-color: #7edce9;
+  background: rgba(29, 91, 106, 0.32);
+}
+
+.field-accusation > button {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  white-space: normal;
+}
+
+@media (max-width: 480px) {
+  .field-accusation {
+    padding: 18px 12px;
+  }
+
+  .field-accusation .field-evidence-card,
+  .field-accusation .field-suspect-card {
+    padding: 13px 11px;
+  }
+}

@@ -49,10 +49,16 @@ export interface GameInvestigation {
   correct: boolean;
 }
 
+import type { FieldState } from "./fieldExpedition.js";
+
 export interface GameState {
+  field?: FieldState;
   sessionCode: string;
   blueprintId: string;
   phase: GamePhase;
+  /** The single public timeline consumed by both clients. `phase` remains for
+   * compatibility with the original puzzle API. */
+  timelinePhase?: "opening" | "investigation" | "contradiction" | "revelation" | "resolution" | "ending";
   completedObjectives: string[];
   discoveredEvidence: string[];
   completedInteractions: string[];
@@ -71,6 +77,7 @@ export function createInitialGameState(
     sessionCode,
     blueprintId,
     phase: "opening",
+    timelinePhase: "opening",
     completedObjectives: [],
     discoveredEvidence: [],
     completedInteractions: [],

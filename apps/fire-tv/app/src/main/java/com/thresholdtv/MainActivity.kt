@@ -2,6 +2,7 @@
 package com.thresholdtv
 
 import android.app.Activity
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
@@ -16,6 +17,7 @@ import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
 import com.thresholdtv.ui.screens.CalibrationScreen
 import com.thresholdtv.ui.screens.ExpeditionScreen
+import com.thresholdtv.ui.screens.OpeningBriefingScreen
 import com.thresholdtv.ui.screens.LobbyScreen
 import android.view.WindowManager
 
@@ -26,9 +28,63 @@ class MainActivity : Activity() {
     private lateinit var lobby: LobbyScreen
     private lateinit var calibration: CalibrationScreen
     private lateinit var expedition: ExpeditionScreen
+    private lateinit var openingScreen: OpeningBriefingScreen
     private lateinit var sessions: SessionController
 
     private var state: ThresholdState = ThresholdState.Idle
+    private var ambientPlayer: MediaPlayer? = null
+    private var ambientResource: Int? = null
+    private var activityResumed = false
+
+    private fun updateAmbientAudio() {
+        val gameplayAudio = state is ThresholdState.ExpeditionReady ||
+            state is ThresholdState.Playing ||
+            state is ThresholdState.Results
+
+        val desiredResource = if (gameplayAudio) {
+            R.raw.threshold_ambient
+        } else {
+            R.raw.threshold_standby
+        }
+
+        if (ambientResource != desiredResource) {
+            ambientPlayer?.release()
+            ambientPlayer = null
+            ambientResource = null
+
+            ambientPlayer = MediaPlayer.create(this, desiredResource)?.apply {
+                isLooping = true
+                val volume = if (gameplayAudio) 0.18f else 0.30f
+                setVolume(volume, volume)
+            }
+
+            if (ambientPlayer != null) {
+                ambientResource = desiredResource
+            }
+        }
+
+        if (activityResumed) {
+            ambientPlayer?.let {
+                if (!it.isPlaying) it.start()
+            }
+        } else {
+            ambientPlayer?.let {
+                if (it.isPlaying) it.pause()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        updateAmbientAudio()
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        updateAmbientAudio()
+        super.onPause()
+    }
     private var showingJoin = false
     private var connecting = false
     private var leaving = false
@@ -42,6 +98,9 @@ class MainActivity : Activity() {
     private var connectedThresholds: List<ConnectedThreshold> = emptyList()
     private var playerNames: List<String> = emptyList()
     private var localZone: String = ""
+
+    private var openingBriefing: org.json.JSONObject? = null
+    private var openingRequestedFor: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,6 +138,7 @@ class MainActivity : Activity() {
         )
 
         expedition = ExpeditionScreen(this)
+        openingScreen = OpeningBriefingScreen(this, ::advance)
 
         if (sessions.hasSavedExpedition()) {
             restoring = true
@@ -180,12 +240,14 @@ class MainActivity : Activity() {
 
         latestAdventure = adventure
 
-        if (state is ThresholdState.Playing) {
+        if (state is ThresholdState.Playing || state is ThresholdState.Results) {
             expedition.update(adventure)
         }
 
-        val phase = adventure.optJSONObject("game")
-            ?.optString("phase", "unknown") ?: "unknown"
+        val game = adventure.optJSONObject("game")
+        val phase = game?.optString("timelinePhase")?.takeIf { it.isNotBlank() }
+            ?: game?.optString("phase", "unknown")
+            ?: "unknown"
 
         android.util.Log.d(
             "Threshold",
@@ -235,10 +297,165 @@ class MainActivity : Activity() {
         lobby.start()
     }
 
+    private var submittingEnding = false
+
+    private fun submitEnding() {
+        if (submittingEnding) return
+        val ending = expedition.selectedDecision() ?: return
+        submittingEnding = true
+        sessions.chooseEnding(
+            ending = ending,
+            onSuccess = { submittingEnding = false },
+            onFailure = { message ->
+                submittingEnding = false
+                android.widget.Toast.makeText(
+                    this, message, android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
+
+    private var submittingTerminal = false
+
+    private var submittingFieldVerdict = false
+
+    private fun submitFieldVerdict() {
+        if (submittingFieldVerdict) return
+        val choice = expedition.selectedFieldVerdict() ?: return
+        submittingFieldVerdict = true
+        sessions.submitFieldVerdict(choice, onSuccess = { submittingFieldVerdict = false; expedition.update(it) }, onFailure = { message -> submittingFieldVerdict = false; android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() })
+    }
+
+    private fun submitTerminal() {
+        if (submittingTerminal) return
+        val choice = expedition.selectedTerminalChoice() ?: return
+        submittingTerminal = true
+        sessions.submitTerminalDecision(
+            choice = choice,
+            onSuccess = { result ->
+                submittingTerminal = false
+                expedition.terminalResult(
+                    result.optBoolean("correct"),
+                    result.optString("narration")
+                )
+            },
+            onFailure = { message ->
+                submittingTerminal = false
+                expedition.terminalResult(false, message)
+            }
+        )
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (state is ThresholdState.Playing || state is ThresholdState.Results)
+        ) {
+            val key = event.keyCode
+
+            if (key == KeyEvent.KEYCODE_BACK) {
+                if (expedition.collapseMonitor()) return true
+
+                if (state is ThresholdState.Results ||
+                    expedition.isFieldComplete()
+                ) {
+                    leaveExpedition()
+                    return true
+                }
+
+                return true
+            }
+
+            if (state is ThresholdState.Playing &&
+                (expedition.isChoosingFieldVerdict() ||
+                 expedition.isChoosingEnding() ||
+                 expedition.isChoosingTerminal())
+            ) {
+                return super.dispatchKeyEvent(event)
+            }
+
+            val handled = when (key) {
+                KeyEvent.KEYCODE_DPAD_UP -> expedition.moveMonitor(2)
+                KeyEvent.KEYCODE_DPAD_DOWN -> expedition.moveMonitor(0)
+                KeyEvent.KEYCODE_DPAD_LEFT -> expedition.moveMonitor(3)
+                KeyEvent.KEYCODE_DPAD_RIGHT -> expedition.moveMonitor(1)
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> expedition.expandMonitor()
+                else -> false
+            }
+
+            if (handled) return true
+        }
+
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onKeyDown(
         keyCode: Int,
         event: KeyEvent?
     ): Boolean {
+        if (state is ThresholdState.Playing && expedition.isChoosingFieldVerdict()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> { expedition.moveFieldVerdict(-1); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { expedition.moveFieldVerdict(1); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { submitFieldVerdict(); return true }
+            }
+        }
+        if (state is ThresholdState.Playing && expedition.isChoosingEnding()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    expedition.moveDecision(-1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    expedition.moveDecision(1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    submitEnding()
+                    return true
+                }
+            }
+        }
+        if (state is ThresholdState.Playing && expedition.isChoosingTerminal()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    expedition.moveTerminalSelection(-1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    expedition.moveTerminalSelection(1)
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    submitTerminal()
+                    return true
+                }
+            }
+        }
+        if (state is ThresholdState.Playing ||
+            state is ThresholdState.Results) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP ->
+                    return expedition.moveMonitor(2)
+
+                KeyEvent.KEYCODE_DPAD_DOWN ->
+                    return expedition.moveMonitor(0)
+
+                KeyEvent.KEYCODE_DPAD_LEFT ->
+                    return expedition.moveMonitor(3)
+
+                KeyEvent.KEYCODE_DPAD_RIGHT ->
+                    return expedition.moveMonitor(1)
+
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER ->
+                    return expedition.expandMonitor()
+
+                KeyEvent.KEYCODE_BACK ->
+                    if (expedition.collapseMonitor()) return true
+            }
+        }
+
         if (
             keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
             keyCode == KeyEvent.KEYCODE_ENTER
@@ -388,20 +605,51 @@ class MainActivity : Activity() {
     }
 
     private fun renderState() {
+        updateAmbientAudio()
         when (val current = state) {
             ThresholdState.Calibrating -> {
                 setContentView(calibration)
                 calibration.start()
             }
 
-            is ThresholdState.ExpeditionReady ->
-                showState(
-                    "ENVIRONMENT ACCEPTED",
-                    "${current.sectorCount} sector.\n" +
-                        "${current.playerCount} player.\n" +
-                        "Architect connection established.",
-                    "PRESS SELECT TO BEGIN EXPEDITION"
-                )
+            is ThresholdState.ExpeditionReady -> {
+                val briefing = openingBriefing
+                val family = briefing?.optString("family", "")
+                    ?.takeIf { it.isNotBlank() } ?: "CLASSIFIED"
+                val title = briefing?.optString("title", "")
+                    ?.takeIf { it.isNotBlank() } ?: "AWAITING CASE FILE"
+                val objective = briefing?.optString("objective", "")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Establishing the investigation briefing."
+
+                openingScreen.showCase(family, title, objective)
+
+                if (openingScreen.parent == null) {
+                    setContentView(openingScreen)
+                    openingScreen.activate()
+                }
+
+                val code = sessionCode
+                if (code != null && openingRequestedFor != code) {
+                    openingRequestedFor = code
+                    sessions.getOpeningBriefing(
+                        expeditionCode = code,
+                        onSuccess = { result ->
+                            if (sessionCode == code &&
+                                state is ThresholdState.ExpeditionReady
+                            ) {
+                                openingBriefing = result
+                                renderState()
+                            }
+                        },
+                        onFailure = {
+                            if (sessionCode == code) {
+                                openingRequestedFor = null
+                            }
+                        }
+                    )
+                }
+            }
 
             is ThresholdState.Playing -> {
                 setContentView(expedition)
@@ -414,12 +662,10 @@ class MainActivity : Activity() {
                 }
             }
 
-            is ThresholdState.Results ->
-                showState(
-                    "EXPEDITION COMPLETE",
-                    "The Architect has recorded your performance.",
-                    "PRESS SELECT TO RESTART EXPEDITION"
-                )
+            is ThresholdState.Results -> {
+                setContentView(expedition)
+                latestAdventure?.let { expedition.update(it) }
+            }
 
             else -> Unit
         }
@@ -457,7 +703,9 @@ class MainActivity : Activity() {
 
     private fun leaveExpedition() {
         if (leaving || connecting) return
-        if (state != ThresholdState.AwaitingPlayers) return
+        if (state != ThresholdState.AwaitingPlayers &&
+            state !is ThresholdState.Results &&
+            !(state is ThresholdState.Playing && expedition.isFieldComplete())) return
 
         leaving = true
         lobby.setLeaving(true)
@@ -488,6 +736,8 @@ class MainActivity : Activity() {
         calibration.stop()
         sessionCode = null
         latestAdventure = null
+        openingBriefing = null
+        openingRequestedFor = null
         connectedThresholds = emptyList()
         playerNames = emptyList()
         localZone = ""
@@ -506,10 +756,15 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        if (state is ThresholdState.Playing && expedition.collapseMonitor()) {
+            return
+        }
         when {
             showingJoin -> cancelJoin()
 
-            state == ThresholdState.AwaitingPlayers -> {
+            state == ThresholdState.AwaitingPlayers ||
+                state is ThresholdState.Results ||
+                (state is ThresholdState.Playing && expedition.isFieldComplete()) -> {
                 leaveExpedition()
             }
 
@@ -522,6 +777,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ambientPlayer?.release()
+        ambientPlayer = null
         sessions.stop()
         home.deactivate()
         join.deactivate()

@@ -77,25 +77,20 @@ describe("validateArchitectDecision", () => {
         },
         allowedObjectRefs,
       ),
-    ).toThrow("Architect proposed an invalid effect");
+    ).toThrow("Architect proposed unauthorized game-state effects");
   });
 
-  it("accepts structurally valid proposed effects", () => {
+  it("rejects even structurally valid effects until the server authorizes them", () => {
     const decision = {
       ...validDecision,
       outcome: "accepted",
       evidenceRequest: undefined,
-      proposedEffects: [
-        {
-          type: "reveal_clue",
-          targetId: "clue-1",
-        },
-      ],
+      proposedEffects: [{ type: "reveal_clue", targetId: "clue-1" }],
     };
 
-    expect(
+    expect(() =>
       validateArchitectDecision(decision, allowedObjectRefs),
-    ).toEqual(decision);
+    ).toThrow("Architect proposed unauthorized game-state effects");
   });
 
   it("rejects missing required fields", () => {

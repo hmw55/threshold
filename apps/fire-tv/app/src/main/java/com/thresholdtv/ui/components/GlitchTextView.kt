@@ -45,6 +45,12 @@ class GlitchTextView(
         resetLayers()
     }
 
+    fun setTextSize(sizeSp: Float) {
+        cyanLayer.textSize = sizeSp
+        magentaLayer.textSize = sizeSp
+        primaryLayer.textSize = sizeSp
+    }
+
     fun setText(value: String) {
         handler.removeCallbacksAndMessages(null)
 

@@ -23,6 +23,8 @@ Issues directly related to Amazon products, Fire OS, Fire TV hardware, AWS servi
 | DF-003 | [Game State Persistence and Session Lifecycle](#df-003--game-state-persistence-and-session-lifecycle) | Medium |
 | DF-004 | [Authentication Contract Consistency](#df-004--authentication-contract-consistency) | Low |
 | DF-005 | [Frontend and Backend Game Phase Synchronization](#df-005--frontend-and-backend-game-phase-synchronization) | Medium |
+| DF-006 | [Fire TV Remote Navigation and Completed Expedition Lifecycle](#df-006--fire-tv-remote-navigation-and-completed-expedition-lifecycle) | Medium |
+| DF-007 | [Cloudflare Tunnel Configuration and Environment Upload Reliability](#df-007--cloudflare-tunnel-configuration-and-environment-upload-reliability) | Medium |
 
 ---
 
@@ -252,7 +254,7 @@ The issue was limited to development and testing; no confirmed production authen
 
 **Area:** Frontend integration / API state synchronization  
 **Severity:** Medium  
-**Status:** Resolved for Act I progression
+**Status:** Resolved for initial progression; subsequent full playthrough validated
 
 **Task**
 
@@ -291,13 +293,21 @@ The Lens interface retrieves current game state and adjusts its behavior when th
 
 After successful signal reconstruction, the backend persists the objective completion and advances the phase to `contradiction`. The frontend recognizes that transition and stops using investigation-specific endpoints.
 
+**Subsequent Validation**
+
+Following additional development of the Last Witness experience, a complete expedition was played from beginning to final verdict using the physical Fire TV application and Lens interface.
+
+This demonstrated end-to-end progression in the tested configuration, beyond the original Act I-only implementation.
+
+The successful playthrough does not establish that every multiplayer configuration, reconnection scenario, or gameplay variation has been fully validated.
+
 **Development Impact**
 
 Phase synchronization required additional frontend API integration and lifecycle handling beyond rendering individual puzzles.
 
 The resulting architecture reduced the risk of clients displaying stale interactions or attempting gameplay operations that were no longer valid for the current adventure phase.
 
-The implementation also established a reusable approach for subsequent Act II and Act III transitions.
+The implementation also established a reusable approach for subsequent phase transitions.
 
 **Lessons Learned**
 
@@ -307,6 +317,134 @@ The implementation also established a reusable approach for subsequent Act II an
 - Stop or invalidate phase-specific requests when the backend advances gameplay.
 - Test transitions between gameplay phases, not only individual puzzle completion.
 - Distinguish a successful production build from full end-to-end validation on physical devices.
+
+---
+
+### DF-006 — Fire TV Remote Navigation and Completed Expedition Lifecycle
+
+**Area:** Native Android / Fire TV input handling / session lifecycle  
+**Severity:** Medium  
+**Status:** Resolved and validated through physical-device testing
+
+**Task**
+
+Provide reliable remote-control navigation across the four surveillance monitors and allow players to exit a completed Last Witness expedition and begin another.
+
+**Expected Behavior**
+
+Players would use the Fire TV remote to select and expand surveillance monitors, return to the monitor grid, and leave a completed expedition without requiring an application restart or manual backend reset.
+
+The application would preserve unfinished expedition restoration while providing a clear exit path after the final transmission.
+
+**Observed Behavior**
+
+During physical-device testing, the Fire TV restored a previously completed expedition into the surveillance interface.
+
+The four-monitor grid did not respond reliably to remote navigation, and the completed game lacked an accessible exit or restart action.
+
+The session lifecycle remained in a playing state even when the field encounter had reached its completed stage. Existing exit handling therefore did not recognize the finished expedition.
+
+**Investigation and Troubleshooting**
+
+1. Inspected the Fire TV activity's session restoration and phase-handling logic.
+2. Reviewed the surveillance grid's monitor selection, expansion, and collapse methods.
+3. Identified the reliance on `onKeyDown()` for remote navigation and confirmed that the surveillance monitor views were not focusable.
+4. Reviewed the existing session-leave implementation and its handling of persisted expedition codes.
+5. Added explicit detection of the completed field encounter.
+6. Extended the existing exit guards to permit leaving a completed expedition.
+7. Added an on-screen instruction directing players to use Back after the final transmission.
+8. Added activity-level key dispatch handling for remote navigation while retaining the existing decision-input behavior.
+9. Rebuilt the native Android application and tested the updated behavior on physical Fire TV hardware.
+
+**Resolution**
+
+Implemented activity-level handling for directional remote input, monitor selection, and Back navigation.
+
+A completed field encounter can now use the existing session-leave flow, which disconnects the Fire TV and clears the locally saved expedition code.
+
+The Android debug build completed successfully, and physical-device testing confirmed that the player could leave a completed expedition and begin another.
+
+**Development Impact**
+
+The navigation and exit issues blocked normal use of the completed-game interface and interrupted repeated playtesting.
+
+Resolving them allowed further end-to-end gameplay testing without requiring manual application or database resets after every completed expedition.
+
+**Lessons Learned**
+
+- Test television interfaces using the physical remote, not only compilation or emulator assumptions.
+- Account for Android view focus and event dispatch when implementing custom remote-driven interfaces.
+- Distinguish session lifecycle state from the completion state of an individual game encounter.
+- Reuse existing session cleanup mechanisms rather than introducing competing lifecycle paths.
+- Include completed-game navigation and replayability in early end-to-end testing.
+
+---
+
+### DF-007 — Cloudflare Tunnel Configuration and Environment Upload Reliability
+
+**Area:** Local development infrastructure / HTTP connectivity / environment configuration  
+**Severity:** Medium  
+**Status:** Working configuration restored; original upload failure cause unconfirmed
+
+**Task**
+
+Enable the Lens frontend to upload environment calibration images and communicate with the session backend through public development endpoints.
+
+**Expected Behavior**
+
+The Lens would successfully communicate with the session backend during calibration, upload the required environment images, and advance into the playable expedition.
+
+Development endpoints would remain correctly configured across service restarts.
+
+**Observed Behavior**
+
+During physical-device testing, the Lens displayed the error:
+
+`[ ERROR ] UPLOAD FAILED: Failed to fetch. RETRY TO CONTINUE.`
+
+The error interrupted the Analyze Environment step.
+
+The development setup used separate Cloudflare Quick Tunnels for the frontend and backend. These tunnels generate temporary public URLs, creating a risk that the Lens could retain an outdated backend address after restarting the development environment.
+
+The precise cause of the original upload failure was not conclusively identified.
+
+**Investigation and Troubleshooting**
+
+1. Reviewed the active local development services and Cloudflare tunnel processes.
+2. Restarted the session backend in database-preserving mode using `pnpm dev:resume`.
+3. Started the Lens Vite development server on port `5173`.
+4. Established a new Cloudflare tunnel for the backend on port `3001`.
+5. Updated the ignored Lens `.env.local` configuration with the new backend tunnel URL.
+6. Restarted Vite so the updated environment variable would be loaded.
+7. Established a separate Cloudflare tunnel for the Lens frontend.
+8. Verified public HTTP responses from both tunnels.
+9. Confirmed that the Lens configuration referenced the current backend endpoint.
+10. Subsequently completed an end-to-end gameplay session using the restored development environment.
+
+**Resolution**
+
+Re-established a working development configuration with separate Cloudflare tunnels for the Lens frontend and session backend.
+
+Verified that the frontend returned HTTP 200 and that the backend root returned its expected HTTP 404 response.
+
+Confirmed that the Lens environment configuration referenced the current backend tunnel URL.
+
+A subsequent complete gameplay session succeeded, although the original upload failure was not isolated to a single confirmed cause.
+
+**Development Impact**
+
+The upload failure temporarily blocked calibration and delayed full gameplay validation.
+
+Maintaining two public development endpoints also introduced manual configuration work whenever Cloudflare Quick Tunnel URLs changed.
+
+**Lessons Learned**
+
+- Treat Cloudflare Quick Tunnel URLs as temporary development infrastructure.
+- Verify that frontend environment variables reference currently active backend endpoints.
+- Restart development servers when environment variables are changed.
+- Distinguish successful tunnel connectivity from successful application-level API requests.
+- Preserve backend logs and failed request details when investigating intermittent upload failures.
+- Avoid assigning a definitive root cause without reproducing and isolating the failure.
 
 ---
 
@@ -321,3 +459,5 @@ The documented resolutions represent decisions made within the project's technic
 Some entries describe integration complexity identified and addressed during implementation rather than failures observed in production. These distinctions are preserved to avoid overstating the impact of development challenges.
 
 Automated test success and successful compilation demonstrate the behavior covered by those checks but do not, by themselves, establish complete end-to-end validation across all physical devices or gameplay scenarios.
+
+The completed Last Witness playthrough validates the tested device and gameplay configuration. It does not establish exhaustive coverage of all player counts, network conditions, or session recovery scenarios.

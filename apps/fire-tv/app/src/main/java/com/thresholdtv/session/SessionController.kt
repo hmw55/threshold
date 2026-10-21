@@ -167,6 +167,121 @@ class SessionController(
         }.start()
     }
 
+    fun getOpeningBriefing(
+        expeditionCode: String,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: () -> Unit
+    ) {
+        val currentGeneration = generation
+
+        Thread {
+            try {
+                val briefing = client.getOpeningBriefing(expeditionCode)
+
+                handler.post {
+                    if (active && !leaving && generation == currentGeneration &&
+                        code == expeditionCode
+                    ) {
+                        onSuccess(briefing)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("Threshold", "Opening briefing unavailable", e)
+
+                handler.post {
+                    if (active && generation == currentGeneration &&
+                        code == expeditionCode
+                    ) {
+                        onFailure()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    fun submitTerminalDecision(
+        choice: Int,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+        val currentGeneration = generation
+        Thread {
+            try {
+                val result = client.submitTerminalDecision(currentCode, choice)
+                handler.post {
+                    if (active && generation == currentGeneration) onSuccess(result)
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Terminal decision failed", e)
+                handler.post {
+                    if (active && generation == currentGeneration) {
+                        onFailure(if (e is SessionException)
+                            "SIGNAL REJECTED: ${e.errorCode}"
+                        else "UNABLE TO CONTACT SESSION SERVICE")
+                    }
+                }
+            }
+        }.start()
+    }
+
+    fun submitFieldVerdict(
+        choice: String,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run { onFailure("NO ACTIVE EXPEDITION"); return }
+        val currentGeneration = generation
+        Thread {
+            try {
+                val result = client.submitFieldVerdict(currentCode, choice)
+                handler.post { if (active && generation == currentGeneration) onSuccess(result) }
+            } catch (e: Exception) {
+                handler.post { if (active && generation == currentGeneration) onFailure(if (e is SessionException) "VERDICT REJECTED: ${e.errorCode}" else "UNABLE TO CONTACT SESSION SERVICE") }
+            }
+        }.start()
+    }
+
+    fun chooseEnding(
+        ending: String,
+        onSuccess: () -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run {
+            onFailure("NO ACTIVE EXPEDITION")
+            return
+        }
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
+        val currentGeneration = generation
+        Thread {
+            try {
+                client.chooseEnding(currentCode, ending)
+                handler.post {
+                    if (active && generation == currentGeneration) onSuccess()
+                }
+            } catch (e: Exception) {
+                Log.e("Threshold", "Final decision failed", e)
+                handler.post {
+                    if (active && generation == currentGeneration) {
+                        onFailure(if (e is SessionException)
+                            "DECISION REJECTED: ${e.errorCode}"
+                        else "UNABLE TO CONTACT SESSION SERVICE")
+                    }
+                }
+            }
+        }.start()
+    }
+
     fun advance(
         onSuccess: (ExpeditionSession) -> Unit,
         onFailure: (String) -> Unit
