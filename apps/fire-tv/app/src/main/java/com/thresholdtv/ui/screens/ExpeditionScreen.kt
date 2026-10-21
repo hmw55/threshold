@@ -386,7 +386,8 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                         field.optString(
                             "endingTransmission",
                             "FINAL TRANSMISSION UNAVAILABLE."
-                        )
+                        ) +
+                        "\n\nBACK // NEW EXPEDITION"
                 } else {
                     "SYSTEM // MONITORING\n" +
                         "ENCOUNTER // ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}\n" +
@@ -459,8 +460,10 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         val col = selectedMonitor % 2
 
         selectedMonitor = when (direction) {
-            0 -> ((row + 1) % 2) * 2 + col
-            1 -> row * 2 + ((col + 1) % 2)
+            0 -> ((row + 1) % 2) * 2 + col  // Down
+            1 -> row * 2 + ((col + 1) % 2)  // Right
+            2 -> ((row + 1) % 2) * 2 + col  // Up
+            3 -> row * 2 + ((col + 1) % 2)  // Left
             else -> selectedMonitor
         }
 
@@ -532,6 +535,9 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     }
 
     fun isChoosingEnding(): Boolean = currentPhase == "resolution"
+
+    fun isFieldComplete(): Boolean =
+        currentPhase == "field-complete" || currentPhase == "complete"
 
     fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict"
     private fun refreshFieldVerdictMonitor() {

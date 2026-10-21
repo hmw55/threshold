@@ -346,6 +346,49 @@ class MainActivity : Activity() {
         )
     }
 
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (state is ThresholdState.Playing || state is ThresholdState.Results)
+        ) {
+            val key = event.keyCode
+
+            if (key == KeyEvent.KEYCODE_BACK) {
+                if (expedition.collapseMonitor()) return true
+
+                if (state is ThresholdState.Results ||
+                    expedition.isFieldComplete()
+                ) {
+                    leaveExpedition()
+                    return true
+                }
+
+                return true
+            }
+
+            if (state is ThresholdState.Playing &&
+                (expedition.isChoosingFieldVerdict() ||
+                 expedition.isChoosingEnding() ||
+                 expedition.isChoosingTerminal())
+            ) {
+                return super.dispatchKeyEvent(event)
+            }
+
+            val handled = when (key) {
+                KeyEvent.KEYCODE_DPAD_UP -> expedition.moveMonitor(2)
+                KeyEvent.KEYCODE_DPAD_DOWN -> expedition.moveMonitor(0)
+                KeyEvent.KEYCODE_DPAD_LEFT -> expedition.moveMonitor(3)
+                KeyEvent.KEYCODE_DPAD_RIGHT -> expedition.moveMonitor(1)
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER -> expedition.expandMonitor()
+                else -> false
+            }
+
+            if (handled) return true
+        }
+
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onKeyDown(
         keyCode: Int,
         event: KeyEvent?
@@ -389,13 +432,18 @@ class MainActivity : Activity() {
                 }
             }
         }
-        if (state is ThresholdState.Playing) {
+        if (state is ThresholdState.Playing ||
+            state is ThresholdState.Results) {
             when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_UP ->
+                    return expedition.moveMonitor(2)
+
                 KeyEvent.KEYCODE_DPAD_DOWN ->
                     return expedition.moveMonitor(0)
 
-                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_LEFT ->
+                    return expedition.moveMonitor(3)
+
                 KeyEvent.KEYCODE_DPAD_RIGHT ->
                     return expedition.moveMonitor(1)
 
@@ -656,7 +704,8 @@ class MainActivity : Activity() {
     private fun leaveExpedition() {
         if (leaving || connecting) return
         if (state != ThresholdState.AwaitingPlayers &&
-            state !is ThresholdState.Results) return
+            state !is ThresholdState.Results &&
+            !(state is ThresholdState.Playing && expedition.isFieldComplete())) return
 
         leaving = true
         lobby.setLeaving(true)
@@ -714,7 +763,8 @@ class MainActivity : Activity() {
             showingJoin -> cancelJoin()
 
             state == ThresholdState.AwaitingPlayers ||
-                state is ThresholdState.Results -> {
+                state is ThresholdState.Results ||
+                (state is ThresholdState.Playing && expedition.isFieldComplete()) -> {
                 leaveExpedition()
             }
 
