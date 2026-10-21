@@ -72,6 +72,7 @@ const child = spawn(
       NODE_ENV: "development",
       THRESHOLD_DB_PATH: databasePath,
       PORT: process.env.PORT ?? "3001",
+      THRESHOLD_LOCK_HELD_BY_LAUNCHER: "1",
     },
   }
 );
