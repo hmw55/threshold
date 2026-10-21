@@ -1,3 +1,9 @@
+import {
+  createLastWitnessCase,
+  publicLastWitnessCase,
+  type LastWitnessCase,
+} from "./lastWitnessCase.js";
+
 /** The Last Witness: evidence-grounded shared encounter director.
  * Fiction is allowed; unobserved physical objects and historical events are not.
  * No language-model output is trusted to verify a physical action.
@@ -29,6 +35,7 @@ export interface FieldState {
   ending: FieldChoice | null;
   startedAt: number;
   finishedAt: number | null;
+  mystery?: LastWitnessCase;
   tvChoice?: FieldChoice | null;
   scoreEvents: FieldScoreEvent[];
   allegiances: Record<string, FieldAllegiance>;
@@ -53,7 +60,22 @@ const transmissions: Record<FieldStage, string> = {
 };
 export function startFieldExpedition(code: string, now = Date.now()): FieldState {
   const seed = [...code].reduce((value, letter) => ((value * 31 + letter.charCodeAt(0)) >>> 0), 17);
-  return { stage: "survey", revision: 0, seed, records: [], votes: {}, ending: null, startedAt: now, finishedAt: null, tvChoice: null, scoreEvents: [], allegiances: {}, puzzle: null, architectLog: [] };
+  return {
+    stage: "survey",
+    revision: 0,
+    seed,
+    mystery: createLastWitnessCase(seed),
+    records: [],
+    votes: {},
+    ending: null,
+    startedAt: now,
+    finishedAt: null,
+    tvChoice: null,
+    scoreEvents: [],
+    allegiances: {},
+    puzzle: null,
+    architectLog: [],
+  };
 }
 export function confirmedObjects(objects: Array<{ id: string; name: string; location: string; recognitionStatus: string }>): FieldObject[] {
   return objects.filter(o => o.recognitionStatus === "confirmed" && o.name.trim().length > 0)
@@ -107,10 +129,19 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
     prompt: dynamicPrompt,
     privateInstruction,
     allegiance,
-    puzzle: state.puzzle ? { ...state.puzzle, answerId: undefined } : null,
-    architectLog: playerId === null ? publicLog : state.architectLog.slice(-5),
+    puzzle: state.puzzle
+      ? { ...state.puzzle, answerId: undefined }
+      : null,
+    architectLog: playerId === null
+      ? publicLog
+      : state.architectLog.slice(-5),
+    mystery: state.mystery
+      ? publicLastWitnessCase(state.mystery)
+      : null,
     scoreEvents: state.scoreEvents.filter(event => playerId === null || event.playerId === playerId),
-    role: playerIndex % 2 === 0 ? "OBSERVER" : "CHALLENGER",
+    role: playerIndex % 2 === 0
+      ? "OBSERVER"
+      : "CHALLENGER",
     submitted: hasSubmitted, received: stageRecords.length,
     required: Math.max(1, players.length),
     objects, prior, ending: state.ending, tvChoice: state.tvChoice ?? null, votes: Object.keys(state.votes).length,
