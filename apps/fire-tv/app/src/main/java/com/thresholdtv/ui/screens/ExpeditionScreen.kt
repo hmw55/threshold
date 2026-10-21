@@ -28,6 +28,8 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     private var selectedEnding = 0
     private var canReconcile = false
     private var currentPhase = ""
+    private val fieldChoices = listOf("preserve", "release", "erase")
+    private var fieldSelection = 0
 
 
     init {
@@ -97,7 +99,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     fun update(data: JSONObject) {
         val game = data.optJSONObject("game") ?: return
         val adventure = data.optJSONObject("adventure")
-        val phase = game.optString("phase", "investigation")
+        val phase = game.optString("timelinePhase", game.optString("phase", "investigation"))
         if (currentPhase != phase) {
             terminalSelection = 0
             terminalFeedback = ""
@@ -182,6 +184,38 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
 
         scoreboard.text = scoreLines.joinToString("\n")
         renderDecision()
+        val field = data.optJSONObject("fieldEncounter")
+        if (field != null) {
+            currentPhase = if (field.optString("stage") == "verdict") "field-verdict" else "field"
+            terminalChoices = emptyList()
+            subtitle.text = "ARCHITECT // LIVE ENVIRONMENT"
+            heading.text = field.optString("title", "THE LAST WITNESS")
+            progress.text = "ENCOUNTER ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}"
+            transmission.text = field.optString("transmission", "")
+            val records = field.optJSONArray("prior")
+            evidence.text = buildString {
+                append("CONFIRMED WITNESS RECORDS\n")
+                if (records != null) for (i in 0 until records.length()) {
+                    val record = records.optJSONObject(i) ?: continue
+                    append("\n> ").append(record.optString("player"))
+                        .append(" // ").append(record.optString("object"))
+                        .append("\n").append(record.optString("observation"))
+                        .append("\n")
+                }
+                if (records == null || records.length() == 0) append("Awaiting the first observation.")
+            }
+            decision.text = if (field.optString("stage") == "verdict")
+                buildString {
+                    append("PUBLIC STANCE // ")
+                    fieldChoices.forEachIndexed { index, item -> append(if (index == fieldSelection) "> " else "  ").append(item.uppercase()).append("\n") }
+                    append("SELECT TO TRANSMIT // LENS VOTES STILL REQUIRED")
+                }
+            else if (field.optString("stage") == "complete")
+                "FINAL DECISION // " + field.optString("ending").uppercase()
+            else "WITNESS REPORTS // ${field.optInt("received")} OF ${field.optInt("required")}"
+            footer.text = "THE ROOM IS THE GAME // CONTINUE ON YOUR LENS"
+            return
+        }
         footer.text = when (phase) {
             "complete" -> "THE ARCHITECT REMEMBERS"
             "resolution" -> "DPAD UP/DOWN TO SELECT // PRESS SELECT TO CONFIRM"
@@ -234,6 +268,14 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     }
 
     fun isChoosingEnding(): Boolean = currentPhase == "resolution"
+
+    fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict"
+    fun moveFieldVerdict(direction: Int): Boolean {
+        if (!isChoosingFieldVerdict()) return false
+        fieldSelection = (fieldSelection + direction + fieldChoices.size) % fieldChoices.size
+        return true
+    }
+    fun selectedFieldVerdict(): String? = if (isChoosingFieldVerdict()) fieldChoices[fieldSelection] else null
 
     fun isChoosingTerminal(): Boolean = terminalChoices.isNotEmpty() && !terminalCompleted
 

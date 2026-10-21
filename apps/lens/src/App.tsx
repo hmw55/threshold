@@ -3,20 +3,13 @@ import { JoinScreen } from "./components/JoinScreen";
 import { ConnectedScreen } from "./components/ConnectedScreen";
 import { RoomScanner } from "./components/RoomScanner";
 import { useExpeditionSession } from "./hooks/useExpeditionSession";
-import { InvestigationScreen } from "./components/InvestigationScreen";
-import { ContradictionScreen } from "./components/ContradictionScreen";
-import { RevelationScreen } from "./components/RevelationScreen";
-import { ResolutionScreen } from "./components/ResolutionScreen";
-import { MissionOverlay } from "./components/MissionOverlay";
-import { ArchitectFeed } from "./components/ArchitectFeed";
-import { gameClient, type GamePhase } from "./services/gameClient";
+import { FieldExpedition } from "./components/FieldExpedition";
 import "./App.css";
 
 function App() {
   const session = useExpeditionSession();
 
   const [scannerDismissed, setScannerDismissed] = useState(false);
-  const [gamePhase, setGamePhase] = useState<GamePhase | null>(null);
 
   const isConnected = session.state === "connected";
   const isCalibrating =
@@ -29,70 +22,10 @@ function App() {
   }, [isCalibrating]);
 
 
-  useEffect(() => {
-    if (
-      !isConnected ||
-      session.phase !== "playing" ||
-      !session.player ||
-      !session.playerToken
-    ) {
-      setGamePhase(null);
-      return;
-    }
-
-    let cancelled = false;
-    let inFlight = false;
-
-    const code = session.sessionCode;
-    const playerId = session.player.id;
-    const token = session.playerToken;
-
-    async function synchronizeGamePhase() {
-      if (inFlight) return;
-      inFlight = true;
-
-      try {
-        const result = await gameClient.getGameState(
-          code,
-          playerId,
-          token,
-        );
-
-        if (!cancelled) {
-          setGamePhase(result.game.phase);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error("Unable to synchronize game phase:", error);
-        }
-      } finally {
-        inFlight = false;
-      }
-    }
-
-    setGamePhase(null);
-    void synchronizeGamePhase();
-
-    const interval = window.setInterval(() => {
-      void synchronizeGamePhase();
-    }, 2000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    isConnected,
-    session.phase,
-    session.sessionCode,
-    session.player?.id,
-    session.playerToken,
-  ]);
-
   const showScanner = isCalibrating && !scannerDismissed;
 
   const showInvestigation =
-    isConnected && session.phase === "playing";
+    isConnected && (session.phase === "playing" || session.phase === "results");
 
   return (
     <main className="lens">
@@ -133,36 +66,8 @@ function App() {
             thresholds={session.thresholds}
             onClose={() => setScannerDismissed(true)}
           />
-        ) : showInvestigation && gamePhase === "contradiction" ? (
-          <ContradictionScreen
-            sessionCode={session.sessionCode}
-            playerId={session.player!.id}
-            playerToken={session.playerToken!}
-            onComplete={() => setGamePhase("revelation")}
-          />
-        ) : showInvestigation && gamePhase === "revelation" ? (
-          <RevelationScreen
-            sessionCode={session.sessionCode}
-            playerId={session.player!.id}
-            playerToken={session.playerToken!}
-            onComplete={() => setGamePhase("resolution")}
-          />
-        ) : showInvestigation &&
-          (gamePhase === "resolution" || gamePhase === "complete") ? (
-          <ResolutionScreen
-            sessionCode={session.sessionCode}
-            playerId={session.player!.id}
-            playerToken={session.playerToken!}
-            onComplete={() => setGamePhase("complete")}
-          />
-        ) : showInvestigation && gamePhase === null ? (
-          <section className="investigation-screen">
-            <p className="investigation-kicker">
-              SYNCHRONIZING EXPEDITION...
-            </p>
-          </section>
         ) : showInvestigation ? (
-          <InvestigationScreen
+          <FieldExpedition
             sessionCode={session.sessionCode}
             playerId={session.player!.id}
             playerToken={session.playerToken!}
@@ -187,16 +92,6 @@ function App() {
               </button>
             )}
           </>
-        )}
-        {isConnected && session.phase === "playing" && session.player && session.playerToken && (
-          <ArchitectFeed sessionCode={session.sessionCode} playerId={session.player.id} playerToken={session.playerToken} />
-        )}
-        {isConnected && session.phase === "playing" && session.player && session.playerToken && (
-          <MissionOverlay
-            sessionCode={session.sessionCode}
-            playerId={session.player.id}
-            playerToken={session.playerToken}
-          />
         )}
         {isConnected && session.phase === "playing" && (
           <button

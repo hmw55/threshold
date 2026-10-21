@@ -1,4 +1,5 @@
 
+import { startFieldExpedition, confirmedObjects, fieldView, submitFieldObservation, voteFieldEnding, setFieldTvChoice, answerFieldPuzzle, answerFieldAllegiance, exposeFieldAllegiance, type FieldChoice, type FieldAction } from "./game/fieldExpedition.js";
 import { completeInteraction } from "./game/interactionService.js";
 import { lastWitnessInteractions } from "./game/lastWitnessInteractions.js";
 import { contradictionPuzzle } from "./game/contradictionPuzzle.js";
@@ -142,8 +143,8 @@ const evidenceImageUpload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024,
     files: 1,
-    fields: 0,
-    parts: 1,
+    fields: 4,
+    parts: 5,
   },
 }).single("image");
 
@@ -270,6 +271,18 @@ function updateSessionStatus(session: Session): void {
     session.players.length > 0
       ? "ready"
       : "awaiting_players";
+}
+
+function timelinePhaseForFieldStage(stage: string): NonNullable<ReturnType<typeof createInitialGameState>["timelinePhase"]> {
+  switch (stage) {
+    case "survey":
+    case "signal": return "investigation";
+    case "exchange": return "contradiction";
+    case "fracture": return "revelation";
+    case "verdict": return "resolution";
+    case "complete": return "ending";
+    default: return "opening";
+  }
 }
 
 app.get("/health", (_request, response) => {
@@ -687,6 +700,7 @@ app.post("/sessions/:code/advance", (request, response) => {
 
     saveGameState({
       ...startedGame,
+      timelinePhase: "opening",
       players: playerStates,
       missions: openingMissions,
       tvEvents: [
@@ -2003,6 +2017,261 @@ app.post("/sessions/:code/threshold/game/decision", (request, response) => {
   response.json({ correct: true, narration: challenge.clue });
 });
 
+
+/** Environment-grounded director. All facts come from confirmed objects and
+ * player-submitted observations. These routes do not use scripted witnesses. */
+function fieldContext(code: string) {
+  const session = getSession(code);
+  if (!session) return null;
+  const game = loadGameState(code);
+  if (!game || !session.environmentId) return null;
+  const objects = confirmedObjects(listEnvironmentObjectsForSession(session.environmentId, code));
+  return { session, game, objects };
+}
+function ensureField(game: ReturnType<typeof loadGameState>) {
+  if (!game) throw new Error("game_not_initialized");
+  if (!game.field) game.field = startFieldExpedition(game.sessionCode);
+  game.field.scoreEvents ??= [];
+  game.field.allegiances ??= {};
+  game.field.architectLog ??= [];
+  game.field.puzzle ??= null;
+  return game.field;
+}
+
+async function evaluateFieldAction(session: Session, playerId: string, object: { id: string; name: string }, action: FieldAction, observation: string, imageKey: string | null) {
+  if (process.env.THRESHOLD_ARCHITECT_MODE === "offline" || process.env.NODE_ENV === "test") return null;
+  try {
+    const architect = new ArchitectDecisionService(createAiProvider({
+      provider: "ollama",
+      ollamaModel: process.env.OLLAMA_MODEL ?? "gemma3:4b",
+      ollamaTimeoutMs: 1_500,
+    }));
+    return await architect.evaluate({
+      sessionCode: session.code,
+      environmentId: session.environmentId!,
+      action: imageKey
+        ? { type: "photo", imageId: imageKey, description: `${action} report for confirmed object ${object.name}: ${observation}` }
+        : { type: "text", text: `${action} report for confirmed object ${object.name}: ${observation}` },
+    });
+  } catch {
+    return null;
+  }
+}
+app.get("/sessions/:code/field", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  const playerId = request.header("x-player-id");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" }); return;
+  }
+  if (session.phase !== "playing" && session.phase !== "results") {
+    response.status(409).json({ error: "game_not_available" }); return;
+  }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  const needsInitialization = !ctx.game.field;
+  const field = ensureField(ctx.game);
+  // The first Lens request is the authoritative opening acknowledgement. The
+  // Fire TV can show the public opening transmission before this happens.
+  if (ctx.game.timelinePhase === "opening") ctx.game.timelinePhase = "investigation";
+  if (needsInitialization || ctx.game.timelinePhase === "investigation") saveGameState(ctx.game);
+  response.json(fieldView(field, ctx.objects, session.players, playerId ?? null));
+});
+/** Players can confirm additional real objects after calibration, including rooms without TVs. */
+app.post("/sessions/:code/field/objects", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" }); return;
+  }
+  if (session.phase !== "playing" || !session.environmentId) {
+    response.status(409).json({ error: "environment_not_ready" }); return;
+  }
+  const name = request.body?.name;
+  const location = request.body?.location;
+  if (typeof name !== "string" || name.trim().length < 2 || name.length > 80 ||
+      typeof location !== "string" || location.trim().length < 2 || location.length > 80) {
+    response.status(400).json({ error: "invalid_object_details" }); return;
+  }
+  const existing = confirmedObjects(listEnvironmentObjectsForSession(session.environmentId, session.code));
+  if (existing.some(o => o.name.toLowerCase() === name.trim().toLowerCase() && o.location.toLowerCase() === location.trim().toLowerCase())) {
+    response.status(409).json({ error: "object_already_known" }); return;
+  }
+  const now = new Date().toISOString();
+  const object = createEnvironmentObject({ id: randomUUID(), environmentId: session.environmentId,
+    parentObjectId: null, name: name.trim(), category: "player_confirmed_object",
+    description: null, location: location.trim(), recognitionStatus: "confirmed",
+    requiresCloserScan: false, createdAt: now });
+  createEnvironmentObservation({ id: randomUUID(), environmentId: session.environmentId,
+    objectId: object.id, sessionCode: session.code, scanGroupId: null,
+    observedName: object.name, observedCategory: object.category,
+    observedDescription: null, observedLocation: object.location,
+    recognitionStatus: "confirmed", observedAt: now });
+  response.status(201).json({ object: { id: object.id, name: object.name, location: object.location } });
+});
+app.post("/sessions/:code/field/observation", evidenceImageUpload, async (request, response) => {
+  const code = request.params.code;
+  const session = getSession(
+    typeof code === "string" ? code : Array.isArray(code) ? (code[0] ?? "") : ""
+  );
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" }); return;
+  }
+  if (session.phase !== "playing") { response.status(409).json({ error: "game_not_active" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  const object = ctx.objects.find(item => item.id === request.body?.objectId);
+  if (!object) { response.status(400).json({ error: "object_not_confirmed" }); return; }
+  const field = ensureField(ctx.game);
+  const observation = request.body?.observation;
+  const action = (typeof request.body?.action === "string" ? request.body.action : "observe") as FieldAction;
+  const detail = typeof request.body?.detail === "string" ? request.body.detail : null;
+  if (!["observe", "examine", "move", "rotate", "reposition", "safe_alternative"].includes(action)) {
+    response.status(400).json({ error: "invalid_field_action" }); return;
+  }
+  if (typeof observation !== "string" || observation.trim().length < 12 || observation.length > 1200) {
+    response.status(400).json({ error: "invalid_observation" }); return;
+  }
+  if (field.stage === "complete" || field.stage === "verdict" || field.records.some(r => r.stage === field.stage && r.playerId === playerId)) {
+    response.status(409).json({ error: "observation_unavailable" }); return;
+  }
+  const mime = request.file ? detectImageType(request.file.buffer) : null;
+  if (request.file && !mime) { response.status(415).json({ error: "unsupported_image" }); return; }
+  let imageKey: string | null = null;
+  try {
+    if (request.file && mime) imageKey = await saveImage(request.file.buffer, session.code, `field-${field.revision}`, mime);
+    const architectDecision = await evaluateFieldAction(session, playerId!, object, action, observation.trim(), imageKey);
+    const updated = submitFieldObservation(field, { playerId: playerId!, object, observation, imageKey, action, detail }, session.players);
+    const directed = architectDecision?.narration
+      ? { ...updated, architectLog: [...updated.architectLog, architectDecision.narration] }
+      : updated;
+    ctx.game.field = directed;
+    ctx.game.timelinePhase = timelinePhaseForFieldStage(directed.stage);
+    ctx.game.tvEvents = [...(ctx.game.tvEvents ?? []).slice(-19), {
+      id: randomUUID(), type: "transmission", message: `${architectDecision?.narration ?? "The Architect records the evidence."} ${directed.stage !== field.stage ? "THE SIGNAL HAS SHIFTED." : "AWAITING ANOTHER PERSPECTIVE."}`,
+      createdAt: Date.now(),
+    }];
+    const player = ctx.game.players?.find(p => p.playerId === playerId);
+    const points = directed.scoreEvents.at(-1)?.playerId === playerId ? directed.scoreEvents.at(-1)?.points ?? 0 : 0;
+    if (player) player.score += points;
+    saveGameState(ctx.game);
+    response.json({ accepted: true, view: fieldView(directed, ctx.objects, session.players, playerId ?? null) });
+  } catch (error) {
+    if (imageKey) await removeImage(imageKey).catch(() => {});
+    response.status(409).json({ error: error instanceof Error ? error.message : "submission_failed" });
+  }
+});
+app.post("/sessions/:code/field/verdict", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) {
+    response.status(401).json({ error: "invalid_player_credentials" }); return;
+  }
+  if (session.phase !== "playing") { response.status(409).json({ error: "game_not_active" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  try {
+    const updated = voteFieldEnding(ensureField(ctx.game), playerId!, request.body?.choice as FieldChoice, session.players);
+    ctx.game.field = updated;
+    ctx.game.timelinePhase = timelinePhaseForFieldStage(updated.stage);
+    if (updated.ending) ctx.game.tvEvents = [...(ctx.game.tvEvents ?? []).slice(-19), {
+      id: randomUUID(), type: "reveal", message: `FINAL SIGNAL: ${updated.ending.toUpperCase()}. The room belongs to its witnesses.`, createdAt: Date.now(),
+    }];
+    saveGameState(ctx.game);
+    if (updated.stage === "complete") {
+      session.phase = "results";
+      saveSession(session.code, session);
+    }
+    response.json({ accepted: true, view: fieldView(updated, ctx.objects, session.players, playerId ?? null) });
+  } catch (error) {
+    response.status(409).json({ error: error instanceof Error ? error.message : "verdict_failed" });
+  }
+});
+
+app.post("/sessions/:code/field/puzzle", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) { response.status(401).json({ error: "invalid_player_credentials" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  try {
+    const result = answerFieldPuzzle(ensureField(ctx.game), playerId!, request.body?.choiceId);
+    ctx.game.field = result.state;
+    if (result.correct) {
+      const player = ctx.game.players?.find(entry => entry.playerId === playerId);
+      if (player) player.score += 250;
+    }
+    saveGameState(ctx.game);
+    response.json({ correct: result.correct, narration: result.narration, view: fieldView(result.state, ctx.objects, session.players, playerId ?? null) });
+  } catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : "puzzle_unavailable" }); }
+});
+
+app.post("/sessions/:code/field/allegiance", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) { response.status(401).json({ error: "invalid_player_credentials" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  if (typeof request.body?.accepted !== "boolean") { response.status(400).json({ error: "accepted_required" }); return; }
+  const playerIndex = session.players.findIndex(player => player.id === playerId);
+  const offer = playerIndex % 2 === 0 ? "cooperate" : "deceive";
+  ctx.game.field = answerFieldAllegiance(ensureField(ctx.game), playerId!, request.body.accepted, offer);
+    saveGameState(ctx.game);
+    response.json({ accepted: request.body.accepted, view: fieldView(ctx.game.field, ctx.objects, session.players, playerId ?? null) });
+  });
+
+app.post("/sessions/:code/field/expose", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const playerId = request.header("x-player-id");
+  const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!authenticateExpeditionPlayer(session, playerId, token)) { response.status(401).json({ error: "invalid_player_credentials" }); return; }
+  const targetPlayerId = request.body?.targetPlayerId;
+  if (typeof targetPlayerId !== "string" || !session.players.some(player => player.id === targetPlayerId)) { response.status(400).json({ error: "invalid_target_player" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  const result = exposeFieldAllegiance(ensureField(ctx.game), playerId!, targetPlayerId);
+  ctx.game.field = result.state;
+  const exposer = ctx.game.players?.find(player => player.playerId === playerId);
+  if (exposer && result.exposed) exposer.score += 300;
+  saveGameState(ctx.game);
+  response.json({ exposed: result.exposed, narration: result.narration, view: fieldView(result.state, ctx.objects, session.players, playerId ?? null) });
+});
+
+app.post("/sessions/:code/threshold/field/verdict", (request, response) => {
+  const session = getSession(request.params.code);
+  if (!session) { response.status(404).json({ error: "session_not_found" }); return; }
+  const deviceId = readDeviceId(request.header("x-device-id"));
+  if (!deviceId || !session.thresholds.some(t => t.deviceId === deviceId)) {
+    response.status(401).json({ error: "invalid_threshold_credentials" }); return;
+  }
+  if (session.phase !== "playing") { response.status(409).json({ error: "game_not_active" }); return; }
+  const ctx = fieldContext(session.code);
+  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  try {
+    ctx.game.field = setFieldTvChoice(ensureField(ctx.game), request.body?.choice as FieldChoice);
+    ctx.game.tvEvents = [...(ctx.game.tvEvents ?? []).slice(-19), {
+      id: randomUUID(), type: "transmission", message: `THE PUBLIC DISPLAY HAS TAKEN A STANCE: ${ctx.game.field.tvChoice?.toUpperCase()}.`, createdAt: Date.now(),
+    }];
+    saveGameState(ctx.game);
+    response.json({ accepted: true, view: fieldView(ctx.game.field, ctx.objects, session.players, null) });
+  } catch (error) {
+    response.status(409).json({ error: error instanceof Error ? error.message : "verdict_failed" });
+  }
+});
+
 /**
  * Read-only adventure state for a registered Fire TV.
  * Does not expose player credentials or mutate gameplay.
@@ -2042,16 +2311,8 @@ app.get("/sessions/:code/threshold/game", (request, response) => {
   }
 
   response.json({
-    terminalChallenge: (gameState.phase in terminalChallenges) ? (() => {
-      const phase = gameState.phase as keyof typeof terminalChallenges;
-      const challenge = terminalChallenge(session.code, phase);
-      const tv = session.thresholds.find((item) => item.deviceId === deviceId)!;
-      return {
-        prompt: challenge.prompt,
-        choices: challenge.choices,
-        completed: gameState.discoveredEvidence.includes(`terminal-${phase}-${tv.id}`),
-      };
-    })() : null,
+    terminalChallenge: null,
+    fieldEncounter: session.environmentId ? fieldView(ensureField(gameState), confirmedObjects(listEnvironmentObjectsForSession(session.environmentId, session.code)), session.players, null) : null,
     scores: [...(gameState.players ?? [])].sort(
       (a, b) => b.score - a.score,
     ),
@@ -2061,6 +2322,7 @@ app.get("/sessions/:code/threshold/game", (request, response) => {
     ),
     game: {
       phase: gameState.phase,
+      timelinePhase: gameState.timelinePhase ?? gameState.phase,
       completedObjectives: gameState.completedObjectives,
       completedInteractions: gameState.completedInteractions,
       discoveredEvidence: gameState.discoveredEvidence,

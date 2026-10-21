@@ -180,12 +180,14 @@ class MainActivity : Activity() {
 
         latestAdventure = adventure
 
-        if (state is ThresholdState.Playing) {
+        if (state is ThresholdState.Playing || state is ThresholdState.Results) {
             expedition.update(adventure)
         }
 
-        val phase = adventure.optJSONObject("game")
-            ?.optString("phase", "unknown") ?: "unknown"
+        val game = adventure.optJSONObject("game")
+        val phase = game?.optString("timelinePhase")?.takeIf { it.isNotBlank() }
+            ?: game?.optString("phase", "unknown")
+            ?: "unknown"
 
         android.util.Log.d(
             "Threshold",
@@ -255,6 +257,15 @@ class MainActivity : Activity() {
 
     private var submittingTerminal = false
 
+    private var submittingFieldVerdict = false
+
+    private fun submitFieldVerdict() {
+        if (submittingFieldVerdict) return
+        val choice = expedition.selectedFieldVerdict() ?: return
+        submittingFieldVerdict = true
+        sessions.submitFieldVerdict(choice, onSuccess = { submittingFieldVerdict = false; expedition.update(it) }, onFailure = { message -> submittingFieldVerdict = false; android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show() })
+    }
+
     private fun submitTerminal() {
         if (submittingTerminal) return
         val choice = expedition.selectedTerminalChoice() ?: return
@@ -279,6 +290,13 @@ class MainActivity : Activity() {
         keyCode: Int,
         event: KeyEvent?
     ): Boolean {
+        if (state is ThresholdState.Playing && expedition.isChoosingFieldVerdict()) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> { expedition.moveFieldVerdict(-1); return true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { expedition.moveFieldVerdict(1); return true }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> { submitFieldVerdict(); return true }
+            }
+        }
         if (state is ThresholdState.Playing && expedition.isChoosingEnding()) {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> {
@@ -486,12 +504,10 @@ class MainActivity : Activity() {
                 }
             }
 
-            is ThresholdState.Results ->
-                showState(
-                    "EXPEDITION COMPLETE",
-                    "The Architect has recorded your performance.",
-                    "PRESS SELECT TO RESTART EXPEDITION"
-                )
+            is ThresholdState.Results -> {
+                setContentView(expedition)
+                latestAdventure?.let { expedition.update(it) }
+            }
 
             else -> Unit
         }

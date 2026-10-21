@@ -200,6 +200,23 @@ class SessionController(
         }.start()
     }
 
+    fun submitFieldVerdict(
+        choice: String,
+        onSuccess: (org.json.JSONObject) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        val currentCode = code ?: run { onFailure("NO ACTIVE EXPEDITION"); return }
+        val currentGeneration = generation
+        Thread {
+            try {
+                val result = client.submitFieldVerdict(currentCode, choice)
+                handler.post { if (active && generation == currentGeneration) onSuccess(result) }
+            } catch (e: Exception) {
+                handler.post { if (active && generation == currentGeneration) onFailure(if (e is SessionException) "VERDICT REJECTED: ${e.errorCode}" else "UNABLE TO CONTACT SESSION SERVICE") }
+            }
+        }.start()
+    }
+
     fun chooseEnding(
         ending: String,
         onSuccess: () -> Unit,

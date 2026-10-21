@@ -130,6 +130,14 @@ class SessionClient(
             headers = mapOf("x-device-id" to deviceId)
         )
 
+    fun submitFieldVerdict(code: String, choice: String): JSONObject =
+        request(
+            method = "POST",
+            path = "/sessions/${normalizeCode(code)}/threshold/field/verdict",
+            payload = JSONObject().put("choice", choice),
+            headers = mapOf("x-device-id" to deviceId)
+        )
+
     fun returnToLobby(code: String): ExpeditionSession =
         parseSession(
             request(
