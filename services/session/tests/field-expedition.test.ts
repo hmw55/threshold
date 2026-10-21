@@ -56,7 +56,7 @@ describe("physical reality first director", () => {
     expect(state.records).toHaveLength(1);
     expect(state.puzzle?.choices.length).toBeGreaterThanOrEqual(2);
 
-    const solved = answerFieldPuzzle(state, "p1", "dresser");
+    const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId);
     expect(solved.correct).toBe(true);
     expect(solved.state.stage).toBe("verdict");
 
@@ -130,8 +130,11 @@ describe("physical reality first director", () => {
     }, players, Date.now(), confirmed);
 
     expect(state.stage).toBe("fracture");
-    expect(state.puzzle?.choices.map(c => c.id)).toContain("dresser");
-    expect(state.puzzle?.choices.map(c => c.id)).toContain("lamp");
+    expect(state.puzzle?.choices.map(c => c.id)).toEqual(
+      state.mystery?.suspects.map(suspect => suspect.id),
+    );
+    expect(state.puzzle?.prompt).toContain("VERIFIED CASE EVIDENCE:");
+    expect(state.puzzle?.prompt).toContain("ROOM WITNESS RECORDS:");
 
     const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId);
     expect(solved.correct).toBe(true);

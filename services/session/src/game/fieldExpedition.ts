@@ -190,7 +190,7 @@ export function submitFieldObservation(state: FieldState, input: {
     points,
     createdAt: now,
   }];
-  const puzzle = advances && !state.puzzle ? buildFieldPuzzle(records, players, worldObjects) : state.puzzle;
+  const puzzle = advances && !state.puzzle ? buildFieldPuzzle(records, state.mystery) : state.puzzle;
   const playerName = players.find(player => player.id === input.playerId)?.name ?? "operative";
   const architectLog = [...state.architectLog,
     `${input.object.name} // ${action.toUpperCase()} reported by ${playerName}.`];
@@ -198,38 +198,42 @@ export function submitFieldObservation(state: FieldState, input: {
   return { ...state, records, stage: next, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
 }
 
-function buildFieldPuzzle(records: FieldRecord[], _players: FieldPlayer[], worldObjects: FieldObject[] = []): FieldPuzzle | null {
+function buildFieldPuzzle(
+  records: FieldRecord[],
+  mystery: LastWitnessCase | undefined,
+): FieldPuzzle | null {
   const evidence = records.filter(record => record.stage === "survey");
-  if (evidence.length === 0) return null;
+  if (evidence.length === 0 || !mystery) return null;
 
-  const counts = new Map<string, number>();
-  for (const record of evidence) {
-    counts.set(record.objectId, (counts.get(record.objectId) ?? 0) + 1);
-  }
+  // The solution comes from the authored case and its decisive clues,
+  // never from counting which physical object received the most reports.
+  const caseEvidence = mystery.clues
+    .map(clue => `• ${clue.publicText}`)
+    .join("\\n");
 
-  const answerId = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-  if (!answerId) return null;
-
-  // Choices come from confirmed room objects and verified observations.
-  const labels = new Map(worldObjects.map(object => [object.id, object.name]));
-  const ids = new Set([
-    ...worldObjects.map(object => object.id),
-    ...evidence.map(record => record.objectId),
-  ]);
-  const choices = [...ids].map(id => ({
-    id,
-    label: labels.get(id) ?? evidence.find(record => record.objectId === id)?.objectName ?? id,
-  })).sort((a, b) => a.label.localeCompare(b.label));
+  const witnessRecords = evidence
+    .map(record => `${record.objectName}: ${record.observation}`)
+    .join("\\n");
 
   return {
-    id: `shared-anchor-${records.length}`,
-    prompt: "DEDUCTION // Which confirmed object is best supported by the witnesses' observations?",
-    choices,
-    answerId,
+    id: `case-deduction-${mystery.id}`,
+    prompt: [
+      `CASE FILE // ${mystery.title}`,
+      mystery.objective,
+      "VERIFIED CASE EVIDENCE:",
+      caseEvidence,
+      "ROOM WITNESS RECORDS:",
+      witnessRecords,
+      "DEDUCTION // Which suspect is supported by the case evidence?",
+    ].join("\\n\\n"),
+    choices: mystery.suspects.map(suspect => ({
+      id: suspect.id,
+      label: suspect.displayName,
+    })),
+    answerId: mystery.solution.culpritId,
     solvedBy: [],
   };
 }
-
 export function answerFieldPuzzle(state: FieldState, playerId: string, choiceId: string, now = Date.now()): { state: FieldState; correct: boolean; narration: string } {
   if (!state.puzzle) throw new Error("puzzle_unavailable");
   if (state.stage !== "fracture") throw new Error("puzzle_unavailable");
