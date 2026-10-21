@@ -11,6 +11,13 @@ interface FieldView {
   progress: number; total: number; target: FieldObject | null; prompt: string; privateInstruction: string | null;
   allegiance: {offer: string; accepted: boolean | null; completed: boolean; exposed: boolean} | null;
   puzzle: {id: string; prompt: string; choices: {id: string; label: string}[]; solvedBy: string[]} | null;
+  mystery: {
+    id: string;
+    title: string;
+    objective: string;
+    suspects: {id: string; kind: string; displayName: string}[];
+    clues: {id: string; publicText: string; requiredForSolution: boolean}[];
+  } | null;
   architectLog: string[];
   scoreEvents: {reason: string; points: number}[];
   role: string; submitted: boolean; received: number; required: number;
@@ -36,6 +43,8 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [accusedSuspect, setAccusedSuspect] = useState("");
+  const [accusationEvidence, setAccusationEvidence] = useState<string[]>([]);
   const busyRef = useRef(false);
   const stageRef = useRef<FieldStage | null>(null);
   const base = `/sessions/${normalizeCode(sessionCode)}/field`;
@@ -108,13 +117,34 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     canvas.toBlob(blob => { if (!blob) return; setCaptured(blob); setCapturedUrl(URL.createObjectURL(blob)); setCameraActive(false); }, "image/jpeg", 0.9);
   }
   function retake() { setCaptured(null); setCapturedUrl(null); setCameraActive(true); }
-  async function answerPuzzle(choiceId: string) {
+  async function answerPuzzle(choiceId: string, evidenceIds: string[]) {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setError("");
-    try { const result = await request<{correct: boolean; narration: string; view: FieldView}>(`${base}/puzzle`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({choiceId})}); setView(result.view); setFeedback(result.narration); }
-    catch (e) { setError(e instanceof Error ? e.message : "DEDUCTION NOT RECEIVED"); }
-    finally { busyRef.current = false; setBusy(false); }
+    busyRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const result = await request<{
+        correct: boolean;
+        outcome: "solved" | "partial" | "incorrect";
+        narration: string;
+        view: FieldView;
+      }>(`${base}/puzzle`, {
+        method: "POST",
+        headers: {...headers, "Content-Type": "application/json"},
+        body: JSON.stringify({choiceId, evidenceIds}),
+      });
+
+      setView(result.view);
+      setFeedback(result.narration);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "DEDUCTION NOT RECEIVED");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
+
   async function answerAllegiance(accepted: boolean) {
     try { const result = await request<{view: FieldView}>(`${base}/allegiance`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({accepted})}); setView(result.view); }
     catch (e) { setError(e instanceof Error ? e.message : "PRIVATE DIRECTIVE UNAVAILABLE"); }
@@ -195,10 +225,63 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
       <p>You chose what the Architect may carry away. Every observation came from a real witness in a real place.</p>
       <p>END OF TRANSMISSION</p>
     </div> : <>
-      <p className="field-prompt">{view.prompt}</p>
-      {view.target && <p className="field-target">SUGGESTED ANCHOR // {view.target.name} · {view.target.location}</p>}
-      {view.puzzle && view.puzzle.solvedBy.length === 0 && <div className="field-puzzle"><strong>DEDUCTION FROM VERIFIED RECORDS</strong><p>{view.puzzle.prompt}</p>{view.puzzle.choices.map(item => <button key={item.id} type="button" disabled={busy} onClick={() => void answerPuzzle(item.id)}>{item.label}</button>)}</div>}
-      {view.stage !== "verdict" && <details className="field-log"><summary>CONFIRM ANOTHER REAL OBJECT OR ROOM</summary>
+      {view.stage !== "fracture" && view.stage !== "verdict" && <p className="field-prompt">{view.prompt}</p>}
+      {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">SUGGESTED ANCHOR // {view.target.name} · {view.target.location}</p>}
+      {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
+        <div className="field-puzzle field-accusation">
+          <strong>FORENSIC ANALYSIS // CONSTRUCT YOUR ACCUSATION</strong>
+          <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
+          <p>{view.mystery?.objective ?? "Determine what the evidence establishes."}</p>
+
+          <h3>01 // VERIFIED EVIDENCE</h3>
+          <p>Choose the records that support your accusation.</p>
+          <div className="field-evidence-list">
+            {view.mystery?.clues.map((clue, index) => (
+              <label className="field-evidence-card" key={clue.id}>
+                <input
+                  type="checkbox"
+                  checked={accusationEvidence.includes(clue.id)}
+                  disabled={busy}
+                  onChange={() => setAccusationEvidence(current =>
+                    current.includes(clue.id)
+                      ? current.filter(id => id !== clue.id)
+                      : [...current, clue.id]
+                  )}
+                />
+                <span>
+                  <strong>RECORD {String(index + 1).padStart(2, "0")}</strong>
+                  <span>{clue.publicText}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <h3>02 // RESPONSIBLE PARTY</h3>
+          <div className="field-suspect-list">
+            {view.puzzle.choices.map(item => (
+              <label className="field-suspect-card" key={item.id}>
+                <input
+                  type="radio"
+                  name="field-accused-suspect"
+                  checked={accusedSuspect === item.id}
+                  disabled={busy}
+                  onChange={() => setAccusedSuspect(item.id)}
+                />
+                <span>{item.label}</span>
+              </label>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            disabled={busy || !accusedSuspect || accusationEvidence.length === 0}
+            onClick={() => void answerPuzzle(accusedSuspect, accusationEvidence)}
+          >
+            {busy ? "TRANSMITTING..." : "TRANSMIT ACCUSATION"}
+          </button>
+        </div>
+      )}
+      {view.stage === "survey" && <details className="field-log"><summary>CONFIRM ANOTHER REAL OBJECT OR ROOM</summary>
         <div className="field-controls">
           <label htmlFor="field-new-object">OBJECT YOU CAN ACTUALLY SEE</label>
           <input id="field-new-object" value={newObject} maxLength={80} onChange={e => setNewObject(e.target.value)} placeholder="e.g. lamp, dog bed, table" />
@@ -214,7 +297,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} onChange={() => setChoice("erase")}/> Erase the Architect's copy</label>
         <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
-      </div> : view.puzzle && view.puzzle.solvedBy.length === 0 ? null : <div className="field-controls">
+      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : view.stage === "survey" ? <div className="field-controls">
         {view.objects.length === 0 ? <p role="alert">No confirmed objects yet. Use “Discover another real object or room” above to confirm one before continuing.</p> : <>
           <label htmlFor="field-object">REAL OBJECT TO INVESTIGATE</label>
           <select id="field-object" value={objectId || view.target?.id || ""} onChange={e => setObjectId(e.target.value)}>
@@ -240,7 +323,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           <button disabled={busy || observation.trim().length < 12 || !view.objects.length || (["examine", "move", "rotate", "reposition"].includes(action) && !captured)} onClick={() => void submit()}>{busy ? "TRANSMITTING..." : "SUBMIT VERIFIED REPORT"}</button>
           <small>Photos support the report. The Architect accepts only legible, grounded evidence and may ask you to retry.</small>
         </>}
-      </div>}
+      </div> : null}
     </>}
     {error && <p className="field-error" role="alert">{error}</p>}
     {feedback && <p className="field-feedback" role="status">{feedback}</p>}

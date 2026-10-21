@@ -67,6 +67,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     private var selectedEnding = 0
     private var canReconcile = false
     private var currentPhase = ""
+    private var lastFieldStage: String? = null
     private val fieldChoices = listOf("preserve", "release", "erase")
     private var fieldSelection = 0
 
@@ -315,7 +316,19 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         renderDecision()
         val field = data.optJSONObject("fieldEncounter")
         if (field != null) {
-            currentPhase = if (field.optString("stage") == "verdict") "field-verdict" else "field"
+            val fieldStage = field.optString("stage", "survey")
+            val previousFieldStage = lastFieldStage
+            if (previousFieldStage != null && previousFieldStage != fieldStage) {
+                val alert = when (fieldStage) {
+                    "fracture" -> "EVIDENCE CONTRADICTION DETECTED"
+                    "verdict" -> "FINAL WITNESS DECISION REQUIRED"
+                    "complete" -> "FINAL TRANSMISSION RECORDED"
+                    else -> null
+                }
+                if (alert != null) interruption.trigger(alert)
+            }
+            lastFieldStage = fieldStage
+            currentPhase = "field-$fieldStage"
             terminalChoices = emptyList()
             subtitle.text = "ARCHITECT // LIVE ENVIRONMENT"
             heading.text = field.optString("title", "THE LAST WITNESS")

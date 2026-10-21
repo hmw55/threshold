@@ -47,14 +47,26 @@ describe("field encounter API",()=>{
     expect(observation.body.view.stage).toBe("fracture");
     expect(observation.body.view.puzzle.choices.length).toBeGreaterThan(0);
 
-    // Exercise the public puzzle endpoint using only its published choices.
-    // Incorrect deductions remain retryable; a correct one unlocks the verdict.
+    // The public case exposes evidence, not the answer key.
+    const mystery = observation.body.view.mystery;
+    expect(mystery).toBeTruthy();
+    expect(mystery.solution).toBeUndefined();
+    expect(mystery.clues.length).toBeGreaterThan(0);
+    expect(mystery.clues.every(
+      (clue: { requiredForSolution?: boolean }) =>
+        clue.requiredForSolution === undefined,
+    )).toBe(true);
+
+    // Submit published evidence alongside each candidate suspect.
+    // Incorrect deductions remain retryable; a supported one unlocks the verdict.
+    const evidenceIds = mystery.clues.map((clue: { id: string }) => clue.id);
     let solved = false;
     for (const item of observation.body.view.puzzle.choices) {
       const answer = await request(app).post(`/sessions/${code}/field/puzzle`).set(headers)
-        .send({choiceId:item.id}).expect(200);
+        .send({choiceId: item.id, evidenceIds}).expect(200);
       if (answer.body.correct) {
         solved = true;
+        expect(answer.body.outcome).toBe("solved");
         expect(answer.body.view.stage).toBe("verdict");
         break;
       }

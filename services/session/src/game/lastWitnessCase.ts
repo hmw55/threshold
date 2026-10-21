@@ -35,8 +35,10 @@ export interface LastWitnessCase {
 
 export type PublicLastWitnessCase = Omit<
   LastWitnessCase,
-  "solution"
->;
+  "solution" | "clues"
+> & {
+  clues: Omit<MysteryClue, "requiredForSolution">[];
+};
 
 const cases: readonly LastWitnessCase[] = [
   {
@@ -202,7 +204,10 @@ export function publicLastWitnessCase(
   mystery: LastWitnessCase,
 ): PublicLastWitnessCase {
   const { solution: _solution, ...publicCase } = mystery;
-  return publicCase;
+  return {
+    ...publicCase,
+    clues: publicCase.clues.map(({ requiredForSolution: _required, ...clue }) => clue),
+  };
 }
 
 export function evaluateMysteryAccusation(

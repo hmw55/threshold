@@ -1011,14 +1011,14 @@ app.post("/sessions/:code/field/puzzle", (request, response) => {
   const ctx = fieldContext(session.code);
   if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
   try {
-    const result = answerFieldPuzzle(ensureField(ctx.game), playerId!, request.body?.choiceId);
+    const result = answerFieldPuzzle(ensureField(ctx.game), playerId!, request.body?.choiceId, request.body?.evidenceIds);
     ctx.game.field = result.state;
     if (result.correct) {
       const player = ctx.game.players?.find(entry => entry.playerId === playerId);
       if (player) player.score += 250;
     }
     saveGameState(ctx.game);
-    response.json({ correct: result.correct, narration: result.narration, view: fieldView(result.state, ctx.objects, session.players, playerId ?? null) });
+    response.json({ correct: result.correct, outcome: result.outcome, narration: result.narration, view: fieldView(result.state, ctx.objects, session.players, playerId ?? null) });
   } catch (error) { response.status(409).json({ error: error instanceof Error ? error.message : "puzzle_unavailable" }); }
 });
 

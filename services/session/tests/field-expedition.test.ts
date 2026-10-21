@@ -20,6 +20,47 @@ const objects = [
 const confirmed = confirmedObjects(objects);
 
 describe("physical reality first director", () => {
+
+  it("rejects an unsupported accusation without advancing or awarding points", () => {
+    let state = startFieldExpedition("test-unsupported", players.slice(0, 1), confirmed);
+
+    state = submitFieldObservation(state, {
+      playerId: "p1",
+      object: confirmed[0]!,
+      observation: "The lamp has a scratch along its base.",
+    }, players.slice(0, 1), Date.now(), confirmed);
+
+    expect(state.stage).toBe("fracture");
+
+    const partial = answerFieldPuzzle(
+      state, "p1", state.mystery!.solution.culpritId, [],
+    );
+
+    expect(partial.outcome).toBe("partial");
+    expect(partial.correct).toBe(false);
+    expect(partial.state.stage).toBe("fracture");
+    expect(partial.state.scoreEvents.some(event => event.points === 250)).toBe(false);
+
+    const wrongSuspect = state.mystery!.suspects.find(
+      suspect => suspect.id !== state.mystery!.solution.culpritId,
+    )!;
+
+    const incorrect = answerFieldPuzzle(
+      state,
+      "p1",
+      wrongSuspect.id,
+      state.mystery!.solution.decisiveClueIds,
+    );
+
+    expect(incorrect.outcome).toBe("incorrect");
+    expect(incorrect.state.stage).toBe("fracture");
+    expect(incorrect.state.scoreEvents.some(event => event.points === 250)).toBe(false);
+
+    expect(() => answerFieldPuzzle(
+      state, "p1", state.mystery!.solution.culpritId, ["fabricated-record"],
+    )).toThrow("invalid_accusation");
+  });
+
   it("never includes unconfirmed objects in its world", () => {
     expect(confirmed.map(o => o.id)).toEqual(["dresser", "lamp"]);
     expect(JSON.stringify(fieldView(startFieldExpedition("ABCD"), confirmed, players, "p1")))
@@ -56,7 +97,7 @@ describe("physical reality first director", () => {
     expect(state.records).toHaveLength(1);
     expect(state.puzzle?.choices.length).toBeGreaterThanOrEqual(2);
 
-    const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId);
+    const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds);
     expect(solved.correct).toBe(true);
     expect(solved.state.stage).toBe("verdict");
 
@@ -87,7 +128,7 @@ describe("physical reality first director", () => {
       playerId: "p2", object: confirmed[1]!,
       observation: "The lamp base has a visible scratch on one side.",
     }, players, Date.now(), confirmed);
-    state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId).state;
+    state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds).state;
     state = voteFieldEnding(state, "p1", "preserve", players);
 
     expect(state.stage).toBe("verdict");
@@ -108,7 +149,7 @@ describe("physical reality first director", () => {
       playerId: "p2", object: confirmed[1]!,
       observation: "The lamp base has a visible scratch on one side.",
     }, players, Date.now(), confirmed);
-    state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId).state;
+    state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds).state;
     state = setFieldTvChoice(state, "erase");
     state = voteFieldEnding(state, "p1", "preserve", players);
     state = voteFieldEnding(state, "p2", "release", players);
@@ -136,7 +177,7 @@ describe("physical reality first director", () => {
     expect(state.puzzle?.prompt).toContain("VERIFIED CASE EVIDENCE:");
     expect(state.puzzle?.prompt).toContain("ROOM WITNESS RECORDS:");
 
-    const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId);
+    const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds);
     expect(solved.correct).toBe(true);
     expect(solved.state.stage).toBe("verdict");
     expect(solved.state.scoreEvents.some(event => event.points === 250)).toBe(true);

@@ -138,3 +138,212 @@
 @media (prefers-reduced-motion: reduce) {
   .field-offer-gate { animation: none; }
 }
+
+/* Threshold Lens // cinematic investigation instrument */
+.field-panel {
+  --lens-cyan: #8ae3ec;
+  --lens-muted: #94acba;
+  --lens-border: #304957;
+  color: #e9f2f5;
+  padding: 20px 12px 48px;
+  background:
+    radial-gradient(ellipse at 90% 0%, #14313b 0%, transparent 45%),
+    linear-gradient(180deg, #0c151d, #080e14);
+  border: 1px solid #243a46;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px #0006, inset 0 1px #ffffff12;
+}
+
+.field-eyebrow {
+  display: flex;
+  align-items: center;
+  color: var(--lens-cyan);
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 2.2px;
+}
+
+.field-eyebrow::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: #8ae3ec;
+  box-shadow: 0 0 12px #8ae3ecaa;
+}
+
+.field-panel h1 {
+  margin: 20px 0 10px;
+  font-size: clamp(23px, 5vw, 32px);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.field-meter {
+  height: 4px;
+  margin: 16px 0;
+  background: #243743;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.field-meter div {
+  background: linear-gradient(90deg, #367e92, #a0f4f5);
+  box-shadow: 0 0 12px #7de1eb;
+}
+
+.field-transmission {
+  position: relative;
+  margin: 20px 0;
+  padding: 38px 18px 20px;
+  border: 1px solid #315667;
+  border-left: 3px solid var(--lens-cyan);
+  border-radius: 8px;
+  background: linear-gradient(130deg, #142b35, #101820);
+  box-shadow: inset 0 1px #ffffff0a;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.field-transmission::before {
+  content: "◉  ARCHITECT TRANSMISSION // LIVE";
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  color: var(--lens-cyan);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.3px;
+}
+
+.field-private.field-directive {
+  border-radius: 8px;
+  border-color: #866746;
+  background: linear-gradient(120deg, #251e1c, #151b22);
+  color: #f2d2a6;
+}
+
+.field-directive-body {
+  border-top-color: #5c4737;
+}
+
+.field-directive-toggle {
+  color: #f2c48b;
+}
+
+.field-prompt {
+  margin: 24px 0 12px;
+  padding-left: 12px;
+  border-left: 3px solid var(--lens-cyan);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.field-target {
+  padding: 12px;
+  background: #18252c;
+  border: 1px dashed #55717d;
+  border-radius: 6px;
+  color: #e4c38f;
+}
+
+.field-controls {
+  gap: 14px;
+  padding: 18px 14px;
+  background: #111d26;
+  border: 1px solid var(--lens-border);
+  border-radius: 10px;
+}
+
+.field-controls label {
+  color: #9ad6e0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+
+.field-controls select,
+.field-controls textarea,
+.field-controls input[type=text],
+.field-controls input:not([type]) {
+  box-sizing: border-box;
+  background: #0a141c;
+  border: 1px solid #3a5664;
+  border-radius: 7px;
+  color: #effaff;
+  min-height: 46px;
+  outline: none;
+}
+
+.field-controls textarea:focus,
+.field-controls select:focus,
+.field-controls input:focus {
+  border-color: #8ae3ec;
+  box-shadow: 0 0 0 2px #8ae3ec20;
+}
+
+.field-controls button {
+  min-height: 48px;
+  border-radius: 7px;
+  background: linear-gradient(120deg, #9ae9ee, #5fc4d2);
+  color: #091b24;
+  font-weight: 900;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.field-controls button:not(:disabled):active {
+  transform: scale(.985);
+}
+
+.field-controls button:disabled {
+  opacity: .42;
+  filter: grayscale(.4);
+}
+
+.field-log {
+  padding: 14px;
+  border: 1px solid #2e4350;
+  border-radius: 8px;
+  background: #111c25;
+}
+
+.field-log summary {
+  color: #9fcad4;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .7px;
+}
+
+.field-puzzle {
+  border-radius: 10px;
+  border-color: #3d8290;
+  background: linear-gradient(145deg, #142d36, #101820);
+}
+
+.field-puzzle p {
+  white-space: pre-line;
+  line-height: 1.7;
+}
+
+.field-puzzle button {
+  border-radius: 6px;
+  background: #8ae3ec;
+  color: #081920;
+}
+
+.field-allegiance,
+.field-offer-gate {
+  border-radius: 9px;
+  box-shadow: 0 0 28px #aa57c018;
+}
+
+.field-ending {
+  border-radius: 10px;
+  background: linear-gradient(140deg, #152c32, #10151d);
+}
+
+@media (max-width: 480px) {
+  .field-panel { padding: 18px 10px 32px; }
+  .field-controls { padding: 16px 12px; }
+}

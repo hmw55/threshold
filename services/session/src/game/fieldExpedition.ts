@@ -1,5 +1,6 @@
 import {
   createLastWitnessCase,
+  evaluateMysteryAccusation,
   publicLastWitnessCase,
   type LastWitnessCase,
 } from "./lastWitnessCase.js";
@@ -209,11 +210,11 @@ function buildFieldPuzzle(
   // never from counting which physical object received the most reports.
   const caseEvidence = mystery.clues
     .map(clue => `• ${clue.publicText}`)
-    .join("\\n");
+    .join("\n");
 
   const witnessRecords = evidence
     .map(record => `${record.objectName}: ${record.observation}`)
-    .join("\\n");
+    .join("\n");
 
   return {
     id: `case-deduction-${mystery.id}`,
@@ -225,7 +226,7 @@ function buildFieldPuzzle(
       "ROOM WITNESS RECORDS:",
       witnessRecords,
       "DEDUCTION // Which suspect is supported by the case evidence?",
-    ].join("\\n\\n"),
+    ].join("\n\n"),
     choices: mystery.suspects.map(suspect => ({
       id: suspect.id,
       label: suspect.displayName,
@@ -234,35 +235,66 @@ function buildFieldPuzzle(
     solvedBy: [],
   };
 }
-export function answerFieldPuzzle(state: FieldState, playerId: string, choiceId: string, now = Date.now()): { state: FieldState; correct: boolean; narration: string } {
-  if (!state.puzzle) throw new Error("puzzle_unavailable");
-  if (state.stage !== "fracture") throw new Error("puzzle_unavailable");
-  if (state.puzzle.solvedBy.includes(playerId)) throw new Error("puzzle_already_solved");
+export function answerFieldPuzzle(
+  state: FieldState,
+  playerId: string,
+  choiceId: string,
+  evidenceIds: readonly string[] = [],
+  now = Date.now(),
+): {
+  state: FieldState;
+  correct: boolean;
+  outcome: "solved" | "partial" | "incorrect";
+  narration: string;
+} {
+  if (!state.puzzle || !state.mystery || state.stage !== "fracture") {
+    throw new Error("puzzle_unavailable");
+  }
+  if (state.puzzle.solvedBy.includes(playerId)) {
+    throw new Error("puzzle_already_solved");
+  }
 
-  const correct = choiceId === state.puzzle.answerId;
+  const validSuspect = state.mystery.suspects.some(suspect => suspect.id === choiceId);
+  const knownEvidence = new Set(state.mystery.clues.map(clue => clue.id));
+
+  if (!validSuspect || !Array.isArray(evidenceIds) ||
+      evidenceIds.length !== new Set(evidenceIds).size ||
+      evidenceIds.some(id => typeof id !== "string" || !knownEvidence.has(id))) {
+    throw new Error("invalid_accusation");
+  }
+
+  const outcome = evaluateMysteryAccusation(state.mystery, choiceId, evidenceIds);
+  const correct = outcome === "solved";
   const puzzle = correct
     ? { ...state.puzzle, solvedBy: [...state.puzzle.solvedBy, playerId] }
     : state.puzzle;
   const scoreEvents = correct
-    ? [...state.scoreEvents, { playerId, reason: "solved evidence deduction", points: 250, createdAt: now }]
+    ? [...state.scoreEvents, {
+        playerId, reason: "solved evidence deduction", points: 250, createdAt: now,
+      }]
     : state.scoreEvents;
-  const architectLog = [...state.architectLog, correct
-    ? "THE ARCHITECT ACCEPTS THE SHARED DEDUCTION."
-    : "THE ARCHITECT MARKS THE DEDUCTION AS UNRESOLVED."];
+
+  const narration = outcome === "solved"
+    ? "Your accusation survives examination. The records converge. The Architect must revise its interpretation."
+    : outcome === "partial"
+      ? "Your suspect is plausible, but the submitted records do not yet establish the full chain of evidence."
+      : "The submitted evidence does not establish responsibility for this incident.";
 
   return {
     state: {
       ...state,
       puzzle,
       scoreEvents,
-      architectLog,
+      architectLog: [...state.architectLog,
+        correct
+          ? "THE ARCHITECT ACCEPTS THE SUPPORTED ACCUSATION."
+          : "THE ARCHITECT CHALLENGES THE ACCUSATION."],
       stage: correct ? "verdict" : state.stage,
       revision: state.revision + 1,
     },
     correct,
-    narration: correct
-      ? "The records converge. The Architect must revise its interpretation."
-      : "The records do not support that conclusion yet.",
+    outcome,
+    narration,
   };
 }
 
