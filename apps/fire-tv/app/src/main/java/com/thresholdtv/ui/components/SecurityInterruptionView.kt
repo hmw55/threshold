@@ -4,8 +4,8 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.media.AudioManager
-import android.media.ToneGenerator
+import android.media.MediaPlayer
+import com.thresholdtv.R
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -17,7 +17,7 @@ import com.thresholdtv.ui.ThresholdTheme
 
 class SecurityInterruptionView(context: Context) : FrameLayout(context) {
     private val handler = Handler(Looper.getMainLooper())
-    private var tone: ToneGenerator? = null
+    private var siren: MediaPlayer? = null
     private var dismissTask: Runnable? = null
 
     private val warning = TextView(context).apply {
@@ -67,27 +67,34 @@ class SecurityInterruptionView(context: Context) : FrameLayout(context) {
         alpha = 1f
         bringToFront()
 
-        tone?.release()
-        tone = ToneGenerator(AudioManager.STREAM_ALARM, 85).also {
-            it.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 1800)
+        releaseSiren()
+        siren = MediaPlayer.create(context, R.raw.threshold_siren)?.also {
+            it.setVolume(0.65f, 0.65f)
+            it.setOnCompletionListener { player ->
+                player.release()
+                if (siren === player) siren = null
+            }
+            it.start()
         }
 
         val task = Runnable {
             visibility = GONE
-            tone?.stopTone()
-            tone?.release()
-            tone = null
+            releaseSiren()
         }
         dismissTask = task
-        handler.postDelayed(task, 3200L)
+        val duration = if (message == "FINAL TRANSMISSION RECORDED") 5000L else 3200L
+        handler.postDelayed(task, duration)
+    }
+
+    private fun releaseSiren() {
+        siren?.release()
+        siren = null
     }
 
     fun stop() {
         dismissTask?.let(handler::removeCallbacks)
         dismissTask = null
-        tone?.stopTone()
-        tone?.release()
-        tone = null
+        releaseSiren()
         visibility = GONE
     }
 

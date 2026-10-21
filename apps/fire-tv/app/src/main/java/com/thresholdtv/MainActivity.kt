@@ -2,6 +2,7 @@
 package com.thresholdtv
 
 import android.app.Activity
+import android.media.MediaPlayer
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
@@ -31,6 +32,59 @@ class MainActivity : Activity() {
     private lateinit var sessions: SessionController
 
     private var state: ThresholdState = ThresholdState.Idle
+    private var ambientPlayer: MediaPlayer? = null
+    private var ambientResource: Int? = null
+    private var activityResumed = false
+
+    private fun updateAmbientAudio() {
+        val gameplayAudio = state is ThresholdState.ExpeditionReady ||
+            state is ThresholdState.Playing ||
+            state is ThresholdState.Results
+
+        val desiredResource = if (gameplayAudio) {
+            R.raw.threshold_ambient
+        } else {
+            R.raw.threshold_standby
+        }
+
+        if (ambientResource != desiredResource) {
+            ambientPlayer?.release()
+            ambientPlayer = null
+            ambientResource = null
+
+            ambientPlayer = MediaPlayer.create(this, desiredResource)?.apply {
+                isLooping = true
+                val volume = if (gameplayAudio) 0.18f else 0.30f
+                setVolume(volume, volume)
+            }
+
+            if (ambientPlayer != null) {
+                ambientResource = desiredResource
+            }
+        }
+
+        if (activityResumed) {
+            ambientPlayer?.let {
+                if (!it.isPlaying) it.start()
+            }
+        } else {
+            ambientPlayer?.let {
+                if (it.isPlaying) it.pause()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        activityResumed = true
+        updateAmbientAudio()
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        updateAmbientAudio()
+        super.onPause()
+    }
     private var showingJoin = false
     private var connecting = false
     private var leaving = false
@@ -503,6 +557,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderState() {
+        updateAmbientAudio()
         when (val current = state) {
             ThresholdState.Calibrating -> {
                 setContentView(calibration)
@@ -672,6 +727,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ambientPlayer?.release()
+        ambientPlayer = null
         sessions.stop()
         home.deactivate()
         join.deactivate()

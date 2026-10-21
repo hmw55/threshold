@@ -93,7 +93,7 @@ function App() {
             )}
           </>
         )}
-        {isConnected && session.phase === "playing" && (
+        {showInvestigation && (
           <button
             type="button"
             onClick={() => void session.disconnect()}

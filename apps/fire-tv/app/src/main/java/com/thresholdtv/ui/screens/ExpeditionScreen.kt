@@ -359,10 +359,26 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             monitors[1].setContent(evidence.text.toString())
             monitors[2].setContent(transmission.text.toString())
             monitors[3].setContent(
-                "SYSTEM // MONITORING\n" +
-                "ENCOUNTER // ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}\n" +
-                "REPORTS // ${field.optInt("received")} / ${field.optInt("required")}\n" +
-                "SIGNAL // ▂▅▃▇▂▄▆▃"
+                if (fieldStage == "verdict") {
+                    buildString {
+                        append("FINAL VERDICT // PUBLIC STANCE\n\n")
+                        fieldChoices.forEachIndexed { index, choice ->
+                            append(if (index == fieldSelection) "▶ " else "    ")
+                            append(choice.uppercase()).append("\n")
+                        }
+                        append("\nDPAD UP / DOWN TO SELECT")
+                        append("\nPRESS SELECT TO TRANSMIT")
+                        append("\nLENS VOTES ALSO REQUIRED")
+                    }
+                } else if (fieldStage == "complete") {
+                    "TRANSMISSION COMPLETE\n\nFINAL DECISION // " +
+                        field.optString("ending").uppercase()
+                } else {
+                    "SYSTEM // MONITORING\n" +
+                        "ENCOUNTER // ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}\n" +
+                        "REPORTS // ${field.optInt("received")} / ${field.optInt("required")}\n" +
+                        "SIGNAL // ▂▅▃▇▂▄▆▃"
+                }
             )
             footer.text = "THE ROOM IS THE GAME // CONTINUE ON YOUR LENS"
             refreshGameplayLayout()
@@ -384,11 +400,13 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             collapseMonitor()
         }
 
-        legacyPanel.visibility = if (requiresDecision) VISIBLE else GONE
+        // Preserve the cinematic 2x2 surveillance grid during decisions.
+        // Decision state remains active for DPAD input handling.
+        legacyPanel.visibility = GONE
         surveillanceGrid.visibility =
-            if (requiresDecision || expandedMonitor != null) GONE else VISIBLE
+            if (expandedMonitor != null) GONE else VISIBLE
         expandedContainer.visibility =
-            if (!requiresDecision && expandedMonitor != null) VISIBLE else GONE
+            if (expandedMonitor != null) VISIBLE else GONE
     }
 
     private fun renderDecision() {
@@ -502,9 +520,23 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     fun isChoosingEnding(): Boolean = currentPhase == "resolution"
 
     fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict"
+    private fun refreshFieldVerdictMonitor() {
+        monitors[3].setContent(buildString {
+            append("FINAL VERDICT // PUBLIC STANCE\n\n")
+            fieldChoices.forEachIndexed { index, choice ->
+                append(if (index == fieldSelection) "▶ " else "    ")
+                append(choice.uppercase()).append("\n")
+            }
+            append("\nDPAD UP / DOWN TO SELECT")
+            append("\nPRESS SELECT TO TRANSMIT")
+            append("\nLENS VOTES ALSO REQUIRED")
+        })
+    }
+
     fun moveFieldVerdict(direction: Int): Boolean {
         if (!isChoosingFieldVerdict()) return false
         fieldSelection = (fieldSelection + direction + fieldChoices.size) % fieldChoices.size
+        refreshFieldVerdictMonitor()
         return true
     }
     fun selectedFieldVerdict(): String? = if (isChoosingFieldVerdict()) fieldChoices[fieldSelection] else null
