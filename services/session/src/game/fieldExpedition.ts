@@ -82,10 +82,91 @@ export function confirmedObjects(objects: Array<{ id: string; name: string; loca
   return objects.filter(o => o.recognitionStatus === "confirmed" && o.name.trim().length > 0)
     .map(({id, name, location}) => ({ id, name, location }));
 }
+function assignedFieldObject(
+  state: FieldState,
+  objects: FieldObject[],
+  players: FieldPlayer[],
+  playerId: string | null,
+): FieldObject | null {
+  if (!objects.length) return null;
+
+  const index = stages.indexOf(state.stage);
+  const playerIndex = Math.max(0, players.findIndex(p => p.id === playerId));
+  const selected = objects[(state.seed + index * 7 + playerIndex * 3) % objects.length] ?? null;
+  if (!selected) return null;
+
+  if (!playerId || !["signal", "exchange"].includes(state.stage)) {
+    return selected;
+  }
+
+  const previousStages: FieldStage[] = state.stage === "signal"
+    ? ["survey"]
+    : ["survey", "signal"];
+
+  const visited = new Set(
+    state.records
+      .filter(record =>
+        record.playerId === playerId &&
+        previousStages.includes(record.stage),
+      )
+      .map(record => record.objectId),
+  );
+
+  // Prefer confirmed objects this player has not investigated in earlier stages.
+  // If every object has been visited, retain the deterministic fallback.
+  const preferredIndex = objects.findIndex(object => object.id === selected.id);
+  for (let offset = 0; offset < objects.length; offset++) {
+    const candidate = objects[(Math.max(0, preferredIndex) + offset) % objects.length];
+    if (candidate && !visited.has(candidate.id)) return candidate;
+  }
+
+  return selected;
+}
+function buildFieldEndingTransmission(state: FieldState): string {
+  const records = state.records.slice(-3);
+  const evidence = records.length
+    ? records.map(record =>
+        `${record.objectName}: "${record.observation}"`,
+      ).join("\n")
+    : "No witness statements were recovered.";
+
+  switch (state.ending) {
+    case "preserve":
+      return [
+        "THE ARCHITECT // RECORD RETAINED",
+        "Your decision preserves the Architect's copy of the witness record.",
+        "The objects and details below remain part of its account:",
+        evidence,
+        "The record survives. Its interpretation is not guaranteed to be true.",
+      ].join("\n\n");
+
+    case "release":
+      return [
+        "THE ARCHITECT // RECORD RELEASED",
+        "The witness statements pass beyond the Architect's exclusive control.",
+        "These are the observations the witnesses chose to contribute:",
+        evidence,
+        "The statements are shared. Their meaning remains open to challenge.",
+      ].join("\n\n");
+
+    case "erase":
+      return [
+        "THE ARCHITECT // COPY ERASED",
+        "The Architect relinquishes its own copy of the witness record.",
+        "The statements that shaped this decision were:",
+        evidence,
+        "The system's copy is gone. This does not delete photographs or other stored user data.",
+      ].join("\n\n");
+
+    default:
+      return "THE ARCHITECT // NO FINAL DECISION WAS RECORDED";
+  }
+}
+
 export function fieldView(state: FieldState, objects: FieldObject[], players: FieldPlayer[], playerId: string | null) {
   const index = stages.indexOf(state.stage);
   const playerIndex = Math.max(0, players.findIndex(p => p.id === playerId));
-  const target = objects.length ? objects[(state.seed + index * 7 + playerIndex * 3) % objects.length] : null;
+  const target = assignedFieldObject(state, objects, players, playerId);
   const stageRecords = state.records.filter(r => r.stage === state.stage);
   const hasSubmitted = stageRecords.some(r => r.playerId === playerId);
   const prompts: Record<FieldStage, string[]> = {
@@ -103,11 +184,45 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
   const dynamicTransmission = latest && state.stage !== "survey" && state.stage !== "complete"
     ? `${transmissions[state.stage]} The last verified witness record concerns ${latest.objectName}. That object is real; what it means is still undecided.`
     : transmissions[state.stage];
-  const dynamicPrompt = state.stage === "signal" && latest
-    ? `A witness recorded a real detail about ${latest.objectName}. Give this object a temporary fictional role in the story. What physical detail would let another player identify it?`
-    : state.stage === "fracture" && latest
-    ? `Challenge the Architect's interpretation of ${latest.objectName}. Inspect a real object and explain what you can prove versus what is only a story.`
-    : prompts[state.stage][(playerIndex + state.seed) % prompts[state.stage].length];
+  const previousStage: FieldStage | null =
+    state.stage === "signal" ? "survey"
+      : state.stage === "exchange" ? "signal"
+      : null;
+
+  const previousObservation = previousStage && playerId
+    ? [...state.records].reverse().find(
+        record => record.stage === previousStage && record.playerId === playerId,
+      )
+    : undefined;
+
+  const dynamicPrompt =
+    (state.stage === "signal" || state.stage === "exchange") &&
+      previousObservation && target
+      ? [
+          "FOLLOW THE EVIDENCE",
+          `PREVIOUS WITNESS RECORD // ${previousObservation.objectName}: "${previousObservation.observation}"`,
+          `NEXT PHYSICAL TARGET // ${target.name} in ${target.location}.`,
+          state.stage === "signal"
+            ? `Inspect ${target.name}. Find a real detail that could support or contradict the earlier observation. Describe what you can actually see; do not assume the objects are connected.`
+            : `Compare ${target.name} with the earlier ${previousObservation.objectName} observation. Look for a specific physical detail that supports, contradicts, or leaves the earlier account unresolved.`,
+          "A witness statement is not independent proof. Report only what you can verify."
+        ].join("\n\n")
+      : state.stage === "fracture"
+        ? [
+            "FRACTURE // THE EVIDENCE DOES NOT SPEAK FOR ITSELF",
+            ...(["survey", "signal", "exchange"] as const).map(stage => {
+              const records = state.records.filter(record => record.stage === stage);
+              return records.length
+                ? `${stage.toUpperCase()} RECORDS\n${records.map(record =>
+                    `WITNESS // ${players.find(player => player.id === record.playerId)?.name ?? "Operative"}\nOBJECT // ${record.objectName} (${record.objectId})\nOBSERVATION // "${record.observation}"\nLIMIT // I cannot independently establish when this detail appeared, what caused it, or what it means from this statement alone.`
+                  ).join("\n\n")}`
+                : `${stage.toUpperCase()} RECORDS\nNo observation was recorded for this stage.`;
+            }),
+            "CONFRONTATION // Compare the three stages. Which details are independently observable? What remains an assumption? Which interpretations remain unverified?",
+            "CLASSIFY THE RELATIONSHIP // Do the records SUPPORT the current hypothesis, CONTRADICT it, or FAIL TO ESTABLISH it? Different objects or different details are not automatically contradictions.",
+            "DECISION // Use the verified case evidence to justify your accusation. Do not invent a connection that the witness records cannot establish."
+          ].join("\n\n")
+        : prompts[state.stage][(playerIndex + state.seed) % prompts[state.stage].length];
   const privateInstruction = playerId === null ? null : state.stage === "exchange"
     ? (playerIndex % 2 === 0
       ? "PRIVATE DIRECTIVE // Share the object name, but keep your most important detail to yourself until the other witness reports."
@@ -126,6 +241,9 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
   const publicLog = state.architectLog.slice(-3);
   return {
     stage: state.stage, title: stageTitles[state.stage], transmission: dynamicTransmission,
+    endingTransmission: state.stage === "complete"
+      ? buildFieldEndingTransmission(state)
+      : null,
     revision: state.revision, progress: index, total: 5, target,
     prompt: dynamicPrompt,
     privateInstruction,
@@ -154,10 +272,18 @@ export function submitFieldObservation(state: FieldState, input: {
   imageKey?: string | null; action?: FieldAction; detail?: string | null;
 }, players: FieldPlayer[], now = Date.now(), worldObjects: FieldObject[] = []): FieldState {
   if (state.stage === "complete") throw new Error("expedition_complete");
-  if (state.stage !== "survey") throw new Error("observation_unavailable");
+  if (!["survey", "signal", "exchange"].includes(state.stage)) {
+    throw new Error("observation_unavailable");
+  }
   if (!players.some(p => p.id === input.playerId)) throw new Error("invalid_player");
-  if (state.records.some(r => r.stage === "survey" && r.playerId === input.playerId)) {
+  if (state.records.some(r => r.stage === state.stage && r.playerId === input.playerId)) {
     throw new Error("already_submitted");
+  }
+  if (state.stage !== "survey") {
+    const target = assignedFieldObject(state, worldObjects, players, input.playerId);
+    if (!target || input.object.id !== target.id) {
+      throw new Error("wrong_directive_object");
+    }
   }
 
   const observation = input.observation.trim();
@@ -169,7 +295,7 @@ export function submitFieldObservation(state: FieldState, input: {
 
   const record: FieldRecord = {
     id: `${state.revision}-${input.playerId}`,
-    stage: "survey",
+    stage: state.stage,
     playerId: input.playerId,
     objectId: input.object.id,
     objectName: input.object.name,
@@ -180,9 +306,13 @@ export function submitFieldObservation(state: FieldState, input: {
     detail: input.detail?.trim() || null,
   };
   const records = [...state.records, record];
-  const contributors = new Set(records.filter(r => r.stage === "survey").map(r => r.playerId));
-  const advances = contributors.size >= Math.max(1, players.length);
-  const next: FieldStage = advances ? "fracture" : "survey";
+  const contributors = new Set(records.filter(r => r.stage === state.stage).map(r => r.playerId));
+  const advances = players.length > 0 && players.every(player => contributors.has(player.id));
+  const next: FieldStage = advances
+    ? state.stage === "survey" ? "signal"
+      : state.stage === "signal" ? "exchange"
+      : "fracture"
+    : state.stage;
   const points = action === "examine" ? 150
     : ["move", "rotate", "reposition"].includes(action) ? 125 : 75;
   const scoreEvents = [...state.scoreEvents, {
@@ -191,10 +321,10 @@ export function submitFieldObservation(state: FieldState, input: {
     points,
     createdAt: now,
   }];
-  const puzzle = advances && !state.puzzle ? buildFieldPuzzle(records, state.mystery) : state.puzzle;
+  const puzzle = next === "fracture" && !state.puzzle ? buildFieldPuzzle(records, state.mystery) : state.puzzle;
   const playerName = players.find(player => player.id === input.playerId)?.name ?? "operative";
   const architectLog = [...state.architectLog,
-    `${input.object.name} // ${action.toUpperCase()} reported by ${playerName}.`];
+    `WITNESS RECORD // ${playerName} reported ${input.object.name}: "${observation}". This is a witness statement, not independent proof of the Architect's interpretation.`];
 
   return { ...state, records, stage: next, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
 }
@@ -203,7 +333,7 @@ function buildFieldPuzzle(
   records: FieldRecord[],
   mystery: LastWitnessCase | undefined,
 ): FieldPuzzle | null {
-  const evidence = records.filter(record => record.stage === "survey");
+  const evidence = records.filter(record => ["survey", "signal", "exchange"].includes(record.stage));
   if (evidence.length === 0 || !mystery) return null;
 
   // The solution comes from the authored case and its decisive clues,

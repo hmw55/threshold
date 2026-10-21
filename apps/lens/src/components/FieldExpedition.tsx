@@ -8,6 +8,7 @@ type FieldAction = "observe" | "examine" | "move" | "rotate" | "reposition" | "s
 interface FieldObject { id: string; name: string; location: string }
 interface FieldView {
   stage: FieldStage; title: string; transmission: string; revision: number;
+  endingTransmission: string | null;
   progress: number; total: number; target: FieldObject | null; prompt: string; privateInstruction: string | null;
   allegiance: {offer: string; accepted: boolean | null; completed: boolean; exposed: boolean} | null;
   puzzle: {id: string; prompt: string; choices: {id: string; label: string}[]; solvedBy: string[]} | null;
@@ -95,7 +96,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     busyRef.current = true; setBusy(true); setError("");
     try {
       const body = new FormData();
-      body.append("objectId", objectId || view.target?.id || "");
+      body.append("objectId", (view.stage === "survey" ? (objectId || view.target?.id) : view.target?.id) || "");
       body.append("observation", observation);
       body.append("action", action);
       if (detail.trim()) body.append("detail", detail.trim());
@@ -222,13 +223,19 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
       : view.stage === "complete" ? <div className="field-ending">
       <h2>THE ROOM IS STILL HERE.</h2>
       <p>FINAL DECISION // {view.ending?.toUpperCase()}</p>
-      <p>You chose what the Architect may carry away. Every observation came from a real witness in a real place.</p>
+      <pre className="field-ending-transmission">
+        {view.endingTransmission ?? "FINAL TRANSMISSION UNAVAILABLE."}
+      </pre>
       <p>END OF TRANSMISSION</p>
     </div> : <>
       {view.stage !== "fracture" && view.stage !== "verdict" && <p className="field-prompt">{view.prompt}</p>}
-      {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">SUGGESTED ANCHOR // {view.target.name} · {view.target.location}</p>}
+      {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">REQUIRED INVESTIGATION // {view.target.name} · {view.target.location}</p>}
       {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
         <div className="field-puzzle field-accusation">
+          <blockquote className="field-transmission" aria-label="Architect evidence challenge">
+            <strong>ARCHITECT // EVIDENCE CHALLENGE</strong>
+            <p>{view.prompt}</p>
+          </blockquote>
           <strong>FORENSIC ANALYSIS // CONSTRUCT YOUR ACCUSATION</strong>
           <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
           <p>{view.mystery?.objective ?? "Determine what the evidence establishes."}</p>
@@ -297,10 +304,17 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} onChange={() => setChoice("erase")}/> Erase the Architect's copy</label>
         <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
-      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : view.stage === "survey" ? <div className="field-controls">
+      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal", "exchange"].includes(view.stage) ? (
+        view.submitted
+          ? <div className="field-controls" role="status">
+              <strong>EVIDENCE RECEIVED</strong>
+              <p>Your investigation is recorded. Awaiting the remaining witnesses.</p>
+              <p>{view.received} / {view.required} reports received</p>
+            </div>
+          : <div className="field-controls">
         {view.objects.length === 0 ? <p role="alert">No confirmed objects yet. Use “Discover another real object or room” above to confirm one before continuing.</p> : <>
           <label htmlFor="field-object">REAL OBJECT TO INVESTIGATE</label>
-          <select id="field-object" value={objectId || view.target?.id || ""} onChange={e => setObjectId(e.target.value)}>
+          <select id="field-object" disabled={view.stage !== "survey"} value={(view.stage === "survey" ? (objectId || view.target?.id) : view.target?.id) || ""} onChange={e => setObjectId(e.target.value)}>
             {view.objects.map(o => <option key={o.id} value={o.id}>{o.name} — {o.location}</option>)}
           </select>
         <label htmlFor="field-action">PHYSICAL INTERACTION</label>
@@ -323,7 +337,8 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           <button disabled={busy || observation.trim().length < 12 || !view.objects.length || (["examine", "move", "rotate", "reposition"].includes(action) && !captured)} onClick={() => void submit()}>{busy ? "TRANSMITTING..." : "SUBMIT VERIFIED REPORT"}</button>
           <small>Photos support the report. The Architect accepts only legible, grounded evidence and may ask you to retry.</small>
         </>}
-      </div> : null}
+      </div>
+      ) : null}
     </>}
     {error && <p className="field-error" role="alert">{error}</p>}
     {feedback && <p className="field-feedback" role="status">{feedback}</p>}

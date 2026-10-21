@@ -19,7 +19,163 @@ const objects = [
 ];
 const confirmed = confirmedObjects(objects);
 
+
+function completeInvestigations(
+  initial: ReturnType<typeof startFieldExpedition>,
+  participants = players,
+) {
+  let state = initial;
+
+  for (const stage of ["signal", "exchange"] as const) {
+    expect(state.stage).toBe(stage);
+
+    for (const player of participants) {
+      const target = fieldView(state, confirmed, participants, player.id).target;
+      if (!target) throw new Error("Missing assigned target");
+
+      state = submitFieldObservation(state, {
+        playerId: player.id,
+        object: target,
+        observation: `I examined the ${target.name} in the ${target.location} and verified a physical detail.`,
+      }, participants, Date.now(), confirmed);
+    }
+  }
+
+  expect(state.stage).toBe("fracture");
+  return state;
+}
+
 describe("physical reality first director", () => {
+  it("uses distinct targets when possible and keeps private observations player-specific", () => {
+    const solo = players.slice(0, 1);
+    const threeObjects = [
+      ...confirmed,
+      { id: "book", name: "Book", location: "Bedroom" },
+    ];
+
+    let state = submitFieldObservation(
+      startFieldExpedition("UNVISITED-TARGETS"),
+      {
+        playerId: "p1",
+        object: threeObjects[0]!,
+        observation: "The dresser has a scratch beneath its bottom drawer.",
+      },
+      solo,
+      Date.now(),
+      threeObjects,
+    );
+
+    const surveyObject = state.records[0]!.objectId;
+    let view = fieldView(state, threeObjects, solo, "p1");
+
+    expect(view.stage).toBe("signal");
+    expect(view.target).not.toBeNull();
+    expect(view.target!.id).not.toBe(surveyObject);
+    expect(view.prompt).toContain(state.records[0]!.observation);
+
+    state = submitFieldObservation(
+      state,
+      {
+        playerId: "p1",
+        object: view.target!,
+        observation: `The ${view.target!.name} has a visible mark on its surface.`,
+      },
+      solo,
+      Date.now(),
+      threeObjects,
+    );
+
+    const signalObject = state.records[state.records.length - 1]!.objectId;
+    view = fieldView(state, threeObjects, solo, "p1");
+
+    expect(view.stage).toBe("exchange");
+    expect(view.target).not.toBeNull();
+    expect(view.target!.id).not.toBe(surveyObject);
+    expect(view.target!.id).not.toBe(signalObject);
+    expect(view.prompt).toContain(state.records[state.records.length - 1]!.observation);
+
+    const multiplayer = players;
+    let shared = submitFieldObservation(
+      startFieldExpedition("PRIVATE-CONTEXT"),
+      {
+        playerId: "p1",
+        object: confirmed[0]!,
+        observation: "The dresser has a scratch beneath its bottom drawer.",
+      },
+      multiplayer,
+      Date.now(),
+      confirmed,
+    );
+
+    shared = submitFieldObservation(
+      shared,
+      {
+        playerId: "p2",
+        object: confirmed[1]!,
+        observation: "The lamp has a chipped base.",
+      },
+      multiplayer,
+      Date.now(),
+      confirmed,
+    );
+
+    const p2View = fieldView(shared, confirmed, multiplayer, "p2");
+    expect(p2View.stage).toBe("signal");
+    expect(p2View.prompt).toContain("The lamp has a chipped base.");
+    expect(p2View.prompt).not.toContain(
+      "The dresser has a scratch beneath its bottom drawer.",
+    );
+  });
+
+
+  it("connects Signal and Exchange instructions to prior observations and assigned targets", () => {
+    const solo = players.slice(0, 1);
+    const firstObservation = "The dresser has a deep scratch beneath its bottom drawer.";
+
+    let state = submitFieldObservation(
+      startFieldExpedition("CONNECTED-CLUES"),
+      {
+        playerId: "p1",
+        object: confirmed[0]!,
+        observation: firstObservation,
+      },
+      solo,
+      Date.now(),
+      confirmed,
+    );
+
+    expect(state.stage).toBe("signal");
+
+    let view = fieldView(state, confirmed, solo, "p1");
+    expect(view.target).not.toBeNull();
+    expect(view.prompt).toContain(firstObservation);
+    expect(view.prompt).toContain(view.target!.name);
+    expect(view.prompt).toContain("FOLLOW THE EVIDENCE");
+
+    const signalObservation =
+      `The ${view.target!.name} has a visible mark near its base.`;
+
+    state = submitFieldObservation(
+      state,
+      {
+        playerId: "p1",
+        object: view.target!,
+        observation: signalObservation,
+      },
+      solo,
+      Date.now(),
+      confirmed,
+    );
+
+    expect(state.stage).toBe("exchange");
+
+    view = fieldView(state, confirmed, solo, "p1");
+    expect(view.prompt).toContain(signalObservation);
+    expect(view.prompt).toContain(view.target!.name);
+    expect(view.prompt).toContain("supports, contradicts");
+  });
+
+
 
   it("rejects an unsupported accusation without advancing or awarding points", () => {
     let state = startFieldExpedition("test-unsupported", players.slice(0, 1), confirmed);
@@ -30,7 +186,7 @@ describe("physical reality first director", () => {
       observation: "The lamp has a scratch along its base.",
     }, players.slice(0, 1), Date.now(), confirmed);
 
-    expect(state.stage).toBe("fracture");
+    state = completeInvestigations(state, players.slice(0, 1));
 
     const partial = answerFieldPuzzle(
       state, "p1", state.mystery!.solution.culpritId, [],
@@ -61,6 +217,80 @@ describe("physical reality first director", () => {
     )).toThrow("invalid_accusation");
   });
 
+  it("records the player's actual physical observation in the Architect log", () => {
+    const observation = "The dresser has a distinctive scratch beneath its bottom drawer.";
+    const state = submitFieldObservation(
+      startFieldExpedition("WITNESS-RECORD"),
+      {
+        playerId: "p1",
+        object: confirmed[0]!,
+        observation,
+      },
+      players.slice(0, 1),
+      Date.now(),
+      confirmed,
+    );
+
+    expect(state.architectLog).toHaveLength(1);
+    expect(state.architectLog[0]).toContain("Dresser");
+    expect(state.architectLog[0]).toContain(observation);
+    expect(state.architectLog[0]).toContain("witness statement");
+    expect(state.architectLog[0]).toContain("not independent proof");
+  });
+
+
+
+  it("confronts a solo witness with their actual observation during Fracture", () => {
+    const solo = players.slice(0, 1);
+    const observation = "The dresser has a distinctive scratch beneath its bottom drawer.";
+
+    let state = submitFieldObservation(
+      startFieldExpedition("FRACTURE-WITNESS"),
+      { playerId: "p1", object: confirmed[0]!, observation },
+      solo,
+      Date.now(),
+      confirmed,
+    );
+
+    state = completeInvestigations(state, solo);
+
+    const view = fieldView(state, confirmed, solo, "p1");
+
+    expect(view.stage).toBe("fracture");
+    expect(view.prompt).toContain(state.records[state.records.length - 1]!.observation);
+    expect(view.prompt).toContain("cannot independently establish");
+    expect(view.prompt).toContain("What remains an assumption?");
+    expect(view.puzzle).not.toBeNull();
+  });
+
+  it("compares all investigation stages in Fracture without inventing contradictions", () => {
+    const solo = players.slice(0, 1);
+    let state = submitFieldObservation(
+      startFieldExpedition("FRACTURE-COMPARE"),
+      {
+        playerId: "p1",
+        object: confirmed[0]!,
+        observation: "The dresser has a deep scratch beneath its bottom drawer.",
+      },
+      solo,
+      Date.now(),
+      confirmed,
+    );
+
+    state = completeInvestigations(state, solo);
+    const view = fieldView(state, confirmed, solo, "p1");
+
+    expect(view.stage).toBe("fracture");
+    expect(view.prompt).toContain("SURVEY RECORDS");
+    expect(view.prompt).toContain("SIGNAL RECORDS");
+    expect(view.prompt).toContain("EXCHANGE RECORDS");
+    expect(view.prompt).toContain("The dresser has a deep scratch beneath its bottom drawer.");
+    expect(view.prompt).toContain("SUPPORT");
+    expect(view.prompt).toContain("CONTRADICT");
+    expect(view.prompt).toContain("FAIL TO ESTABLISH");
+    expect(view.prompt).toContain("not automatically contradictions");
+  });
+
   it("never includes unconfirmed objects in its world", () => {
     expect(confirmed.map(o => o.id)).toEqual(["dresser", "lamp"]);
     expect(JSON.stringify(fieldView(startFieldExpedition("ABCD"), confirmed, players, "p1")))
@@ -82,19 +312,23 @@ describe("physical reality first director", () => {
       playerId: "p2", object: confirmed[1]!, observation: "The lamp base has a visible scratch.",
     }, players, Date.now(), confirmed);
 
-    expect(two.stage).toBe("fracture");
+    expect(two.stage).toBe("signal");
     expect(two.records).toHaveLength(2);
-    expect(two.puzzle?.choices.length).toBeGreaterThanOrEqual(2);
+    expect(two.puzzle).toBeNull();
+
+    const finished = completeInvestigations(two);
+    expect(finished.records).toHaveLength(6);
+    expect(finished.puzzle?.choices.length).toBeGreaterThanOrEqual(2);
   });
 
   it("allows solo play without inventing teammates", () => {
-    const state = submitFieldObservation(startFieldExpedition("SOLO"), {
+    let state = submitFieldObservation(startFieldExpedition("SOLO"), {
       playerId: "p1", object: confirmed[0]!,
       observation: "The dresser has a visible mark along the bottom drawer.",
     }, players.slice(0, 1), Date.now(), confirmed);
 
-    expect(state.stage).toBe("fracture");
-    expect(state.records).toHaveLength(1);
+    state = completeInvestigations(state, players.slice(0, 1));
+    expect(state.records).toHaveLength(3);
     expect(state.puzzle?.choices.length).toBeGreaterThanOrEqual(2);
 
     const solved = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds);
@@ -106,16 +340,21 @@ describe("physical reality first director", () => {
     expect(finished.ending).toBe("erase");
   });
 
-  it("rejects a second observation after the opening stage", () => {
+  it("rejects an observation of the wrong assigned object", () => {
     const state = submitFieldObservation(startFieldExpedition("SOLO"), {
       playerId: "p1", object: confirmed[0]!,
       observation: "A genuine physical detail on the dresser.",
     }, players.slice(0, 1), Date.now(), confirmed);
 
+    expect(state.stage).toBe("signal");
+    const target = fieldView(state, confirmed, players.slice(0, 1), "p1").target!;
+    const wrong = confirmed.find(object => object.id !== target.id)!;
+
     expect(() => submitFieldObservation(state, {
-      playerId: "p1", object: confirmed[1]!,
-      observation: "Another genuine physical detail on the lamp.",
-    }, players.slice(0, 1), Date.now(), confirmed)).toThrow("observation_unavailable");
+      playerId: "p1",
+      object: wrong,
+      observation: "I inspected this real object, but it was not the assigned target.",
+    }, players.slice(0, 1), Date.now(), confirmed)).toThrow("wrong_directive_object");
   });
 
   it("does not allow duplicate votes and resolves shared decisions", () => {
@@ -128,6 +367,7 @@ describe("physical reality first director", () => {
       playerId: "p2", object: confirmed[1]!,
       observation: "The lamp base has a visible scratch on one side.",
     }, players, Date.now(), confirmed);
+    state = completeInvestigations(state);
     state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds).state;
     state = voteFieldEnding(state, "p1", "preserve", players);
 
@@ -149,6 +389,7 @@ describe("physical reality first director", () => {
       playerId: "p2", object: confirmed[1]!,
       observation: "The lamp base has a visible scratch on one side.",
     }, players, Date.now(), confirmed);
+    state = completeInvestigations(state);
     state = answerFieldPuzzle(state, "p1", state.puzzle!.answerId, state.mystery!.solution.decisiveClueIds).state;
     state = setFieldTvChoice(state, "erase");
     state = voteFieldEnding(state, "p1", "preserve", players);
@@ -170,7 +411,7 @@ describe("physical reality first director", () => {
       observation: "The lamp base has a visible scratch on one side.",
     }, players, Date.now(), confirmed);
 
-    expect(state.stage).toBe("fracture");
+    state = completeInvestigations(state);
     expect(state.puzzle?.choices.map(c => c.id)).toEqual(
       state.mystery?.suspects.map(suspect => suspect.id),
     );

@@ -27,6 +27,53 @@ describe("field encounter API",()=>{
     await request(app).post(`/sessions/${code}/field/observation`).set(headers)
       .field("objectId","imaginary-bookshelf").field("observation","I saw this in the room for real.").expect(400);
   });
+  it("rejects a confirmed but incorrectly targeted object during Signal", async () => {
+    const { code, headers } = await setup();
+
+    const first = await request(app)
+      .post(`/sessions/${code}/field/objects`)
+      .set(headers)
+      .send({ name: "Dresser", location: "Bedroom" })
+      .expect(201);
+
+    const second = await request(app)
+      .post(`/sessions/${code}/field/objects`)
+      .set(headers)
+      .send({ name: "Lamp", location: "Bedroom" })
+      .expect(201);
+
+    await request(app)
+      .post(`/sessions/${code}/field/observation`)
+      .set(headers)
+      .field("objectId", first.body.object.id)
+      .field("observation", "The dresser has a visible scratch beneath its drawer.")
+      .expect(200);
+
+    const signal = await request(app)
+      .get(`/sessions/${code}/field`)
+      .set(headers)
+      .expect(200);
+
+    expect(signal.body.stage).toBe("signal");
+
+    // Select a confirmed object that differs from the server-assigned target.
+    const wrongObjectId =
+      signal.body.target.id === first.body.object.id
+        ? second.body.object.id
+        : first.body.object.id;
+
+    expect(wrongObjectId).not.toBe(signal.body.target.id);
+
+    const rejected = await request(app)
+      .post(`/sessions/${code}/field/observation`)
+      .set(headers)
+      .field("objectId", wrongObjectId)
+      .field("observation", "This object has a visible mark along its base.")
+      .expect(409);
+
+    expect(rejected.body.error).toBe("wrong_directive_object");
+  });
+
   it("confirms real objects and completes a solo session without fake evidence",async()=>{
     const {code,headers}=await setup();
     const opening = await request(app).get(`/sessions/${code}/threshold/game`).set("x-device-id","tv-1").expect(200);
@@ -44,11 +91,32 @@ describe("field encounter API",()=>{
       .field("observation","The dresser has a visible mark along the bottom drawer.")
       .expect(200);
 
-    expect(observation.body.view.stage).toBe("fracture");
-    expect(observation.body.view.puzzle.choices.length).toBeGreaterThan(0);
+    expect(observation.body.view.stage).toBe("signal");
+
+    let currentView = observation.body.view;
+
+    for (const stage of ["signal", "exchange"]) {
+      expect(currentView.stage).toBe(stage);
+      expect(currentView.target?.id).toBeTruthy();
+
+      const report = await request(app)
+        .post(`/sessions/${code}/field/observation`)
+        .set(headers)
+        .field("objectId", currentView.target.id)
+        .field(
+          "observation",
+          `I inspected the assigned ${currentView.target.name} and verified a real physical detail.`,
+        )
+        .expect(200);
+
+      currentView = report.body.view;
+    }
+
+    expect(currentView.stage).toBe("fracture");
+    expect(currentView.puzzle.choices.length).toBeGreaterThan(0);
 
     // The public case exposes evidence, not the answer key.
-    const mystery = observation.body.view.mystery;
+    const mystery = currentView.mystery;
     expect(mystery).toBeTruthy();
     expect(mystery.solution).toBeUndefined();
     expect(mystery.clues.length).toBeGreaterThan(0);
@@ -61,7 +129,7 @@ describe("field encounter API",()=>{
     // Incorrect deductions remain retryable; a supported one unlocks the verdict.
     const evidenceIds = mystery.clues.map((clue: { id: string }) => clue.id);
     let solved = false;
-    for (const item of observation.body.view.puzzle.choices) {
+    for (const item of currentView.puzzle.choices) {
       const answer = await request(app).post(`/sessions/${code}/field/puzzle`).set(headers)
         .send({choiceId: item.id, evidenceIds}).expect(200);
       if (answer.body.correct) {

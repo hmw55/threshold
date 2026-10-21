@@ -333,7 +333,16 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             subtitle.text = "ARCHITECT // LIVE ENVIRONMENT"
             heading.text = field.optString("title", "THE LAST WITNESS")
             progress.text = "ENCOUNTER ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}"
-            transmission.text = field.optString("transmission", "")
+            transmission.text = if (fieldStage == "fracture") {
+                buildString {
+                    append("ARCHITECT // EVIDENCE CHALLENGE\n\n")
+                    append(field.optString("prompt", ""))
+                    append("\n\n")
+                    append(field.optString("transmission", ""))
+                }
+            } else {
+                field.optString("transmission", "")
+            }
             val records = field.optJSONArray("prior")
             evidence.text = buildString {
                 append("CONFIRMED WITNESS RECORDS\n")
@@ -372,7 +381,12 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                     }
                 } else if (fieldStage == "complete") {
                     "TRANSMISSION COMPLETE\n\nFINAL DECISION // " +
-                        field.optString("ending").uppercase()
+                        field.optString("ending").uppercase() +
+                        "\n\n" +
+                        field.optString(
+                            "endingTransmission",
+                            "FINAL TRANSMISSION UNAVAILABLE."
+                        )
                 } else {
                     "SYSTEM // MONITORING\n" +
                         "ENCOUNTER // ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}\n" +

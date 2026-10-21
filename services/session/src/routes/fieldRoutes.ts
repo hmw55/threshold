@@ -933,19 +933,38 @@ app.post("/sessions/:code/field/observation", evidenceImageUpload, async (reques
   if (!session.environmentId) { response.status(409).json({ error: "environment_not_ready" }); return; }
   const object = ctx.objects.find(item => item.id === request.body?.objectId);
   if (!object) { response.status(400).json({ error: "object_not_confirmed" }); return; }
+
   const field = ensureField(ctx.game);
   const observation = request.body?.observation;
   const action = (typeof request.body?.action === "string" ? request.body.action : "observe") as FieldAction;
   const detail = typeof request.body?.detail === "string" ? request.body.detail : null;
+
   if (!["observe", "examine", "move", "rotate", "reposition", "safe_alternative"].includes(action)) {
     response.status(400).json({ error: "invalid_field_action" }); return;
   }
   if (typeof observation !== "string" || observation.trim().length < 12 || observation.length > 1200) {
     response.status(400).json({ error: "invalid_observation" }); return;
   }
-  if (field.stage !== "survey" || field.records.some(r => r.stage === "survey" && r.playerId === playerId)) {
+  if (!["survey", "signal", "exchange"].includes(field.stage) ||
+      field.records.some(r => r.stage === field.stage && r.playerId === playerId)) {
     response.status(409).json({ error: "observation_unavailable" }); return;
   }
+
+  // Survey accepts any confirmed object. Signal and Exchange must
+  // enforce the assigned target before invoking the Architect.
+  if (field.stage !== "survey") {
+    const expectedTarget = fieldView(
+      field, confirmedObjects(listEnvironmentObjectsForSession(session.environmentId, session.code)),
+      session.players, playerId ?? null,
+    ).target;
+
+    if (!expectedTarget || expectedTarget.id !== object.id) {
+      response.status(409).json({ error: "wrong_directive_object" }); return;
+    }
+  }
+
+
+
   const mime = request.file ? detectImageType(request.file.buffer) : null;
   if (request.file && !mime) { response.status(415).json({ error: "unsupported_image" }); return; }
   let imageKey: string | null = null;
