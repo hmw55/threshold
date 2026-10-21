@@ -45,81 +45,80 @@ If account activation, verification, or service quotas prevented inference, thos
 
 On October 9, 2026, AWS CLI authentication succeeded using an IAM Identity Center administrator permission set. Amazon Bedrock successfully returned model information confirming that `amazon.nova-micro-v1:0` was active and supported on-demand inference in `us-east-1`.
 
-However, an initial Converse API request at approximately 4:00 AM MDT returned an `AccessDeniedException`, stating that the AWS account was undergoing verification. The error indicated that verification normally takes less than two hours.
+At approximately 4:00 MDT, an initial Converse API request returned an `AccessDeniedException` indicating that the AWS account was undergoing verification, which the error suggested would normally take less than two hours. More than siz hours later, another request returned `ThrottlingException: Too many tokens per day, please wait before trying again.` No successful inference has occurred.
 
-More than six hours later, the same request returned a `ThrottlingException` stating: "Too many tokens per day, please wait before trying again."
+AWS Service Quotas showed applied values of zero for Nova Micro on-demand requests per minute, tokens per minute, daily invocation tokens, and cross-region inference quotas. The AWS Account console showed no apparent activation requirement; its Customer Verification page stated that customer verification was not required at that time. AWS User Notifications verification messages discovered in Gmail's Spam folder concerned delivery channels, not Bedrock inference access.
 
-Further investigation through AWS Service Quotas revealed that Amazon Nova Micro had zero allocated on-demand requests per minute, tokens per minute, and model invocation tokens per day. Cross-region inference quotas were also zero.
+A support case was submitted on October 9 at 10:26 AM MDT. AWS Support responded on October 14 at 12:32 PM MDT, approximately 5 days and 2 hours later. The support engineer apologized for the delay and reported consulting the Bedrock team. The team recommended increasing usage of existing AWS services to support a future quote increase, contacting AWS Sales for an account-manager evaluation, potentially using Free Tier services to establish activity, or waiting until a subsequent billing cycle. The response did not identify the specific reason for zero Bedrock inference quotes or enable initial inference access.
 
-The AWS Account console displayed no apparent activation requirements, and its Customer Verification page stated: "You are not required to complete customer verification of your account at this time."
+On October 21, further Service Quota checks in `us-east-1` showed zero applied daily inference-token allowances for numerous models, including Amazon Nova Lite, Nova Pro, Nova 2 Lite, and multiple Anthropic Claude models, despite higher displayed AWS default quotas. A separate cross-model quote was nonzero, but that did not resolve the model-specific zero allowances. A direct Converse API invocation using `amazon.nova-lite-v1:0` again returned `ThrottlingException: Too many tokens per day, please wait before trying again.` Model discovery continued to work, but invocation remained blocked for the tested models. 
 
-The developer also discovered AWS User Notifications verification emails in Gmail's Spam folder. These concerned notification delivery channels rather than Bedrock inference access and did not provide a resolution.
-
-AWS Support's automated assistant investigated account verification, incomplete account activation, and payment verification but could not provide a recommendation. A support case was subsequently created on October 9, 2026, at 10:26 AM MDT.
+The existing support case was reopened by the developer (me) on October 21 at 12:17 PM MDT, requesting urgent escalation, an explanation of the zero quota, and consideration of minimal nonzero inference access for the October 23 hackathon deadline. As of this update, no successful Bedrock inference request has been confirmed.
 
 **Troubleshooting Steps**
 
-1. Configured IAM Identity Center and assigned the `AdministratorAccess` permission set.
-2. Installed AWS CLI v2 and authenticated using an SSO profile.
-3. Verified authentication using `aws sts get-caller-identity`.
-4. Listed available Amazon Bedrock foundation models.
-5. Confirmed that Amazon Nova Micro was active and supported on-demand inference.
-6. Attempted a Converse API request and received an account-verification error.
-7. Retried more than six hours later and received a daily-token throttling error.
-8. Queried AWS Service Quotas and identified zero allocated inference capacity for Nova Micro.
-9. Reviewed AWS Account information and Customer Verification status.
-10. Reviewed AWS User Notifications verification emails.
-11. Opened AWS Support Center and submitted the issue to its automated troubleshooting assistant.
-12. Received no actionable recommendation from the assistant.
-13. Created an AWS Support case under Account Management / Account Verification.
+1. Configured IAM Identity Center with an `AdministratorAccess` permission set, installed AWS CLI v2, and authenticated using an SSO profile.
+2. Verified AWS identity using `aws sts get-caller-identity` and listed available Bedrock foundation models.
+3. Confirmed Nova Micro's active status and reported on-demand inference support.
+4. Attempted a Converse API request and received an account-verification error.
+5. Retried more than six hours later and received a daily-token throttling error.
+6. Inspected AWS Service Quotas and found zero effective inference allowances for Nova Micro.
+7. Checked AWS Account activation and Customer Verification status, and reviewed unrelated AWS User Notifications verification emails.
+8. Used the AWS Support automated assistant, which did not identify an actionable resolution.
+9. Created AWS Support case `179156319400779` on October 9 under Account Management / Account Verification.
+10. Reviewed the October 14 AWS Support reply, including the Bedrock team's usage, Sales, and billing-cycle recommendations.
+11. Rechecked model-specific daily quotas for multiple models in `us-east-1` on October 21.
+12. Attempted direct inference with Nova Lite and reproduced the daily-token throttling error.
+13. Reopened the support case on October 21 with the latest evidence and requested an expedited review before the hackathon deadline.
 
 **Development Impact**
 
-The issue prevented Threshold from performing its first successful Amazon Bedrock inference request, blocking validation of The Architect's planned cloud AI integration.
+The restriction prevented the first successful Amazon Bedrock inference request and blocked validation of The Architect's planned cloud AI integration, including real-world inference behavior and latency.
 
-The developer spent additional time investigating account activation, model availability, service quotas, email verification, and AWS Support instead of implementing application functionality.
+Investigation, account checks, and support correspondence consumed development time across October 9–21. The issue remained unresolved twelve days after the original support request, with the October 23, 2026, 1:00 PM Mountain Time hackathon deadline approaching.
 
-Because Threshold is being developed for the Amazon Devices Global Hackathon, the unresolved restriction also introduces uncertainty into a time-constrained development schedule.
-
-Local development can continue through mock AI responses, but actual Bedrock behavior, latency, and integration cannot yet be validated.
+Local development could continue using mock responses or an alternative local AI provider, but those paths could not validate the actual Bedrock integration. The inability to perform even minimal inference introduced significant schedule risk to the AWS-powered demonstration.
 
 **What Worked Well**
 
 - IAM Identity Center authentication and AWS CLI integration worked successfully.
-- Amazon Bedrock model discovery returned useful model metadata.
-- The initial API error identified account verification as a possible restriction and provided an escalation contact.
-- AWS Service Quotas exposed the account's zero inference allowances.
-- AWS Support Center allowed a Basic Support customer to create an account-related support case without upgrading to a paid plan.
-- The support case preserved the developer's error messages and troubleshooting findings.
+- Amazon Bedrock model discovery returned useful metadata, allowing model availability to be distinguished from inference eligibility.
+- AWS Service Quotas exposed applied values and made the zero inference allowances independently observable.
+- The initial error identified account verification as a possible restriction.
+- Basic Support allowed an account-related case to be opened without upgrading to a paid support plan.
+- AWS Support responded, consulted its Bedrock team, and preserved the case correspondence.
+- The Support Center permitted the original case to be reopened with additional evidence.
 
 **Areas of Friction**
 
-- Successful authentication and model discovery created the impression that the account was ready for inference, despite zero usable inference quotas.
-- The verification restriction was not clearly surfaced during account setup or model discovery.
-- The initial error suggested a verification delay of less than two hours, but inference remained unavailable more than six hours later.
-- Subsequent requests produced a different error describing daily token exhaustion, even though no successful inference had occurred.
-- Zero inference quotas were visible in Service Quotas, but the console did not provide a clear explanation of why they were zero or how to enable them.
-- The Customer Verification page indicated that no verification was required, which did not clarify the earlier account-verification error.
-- The automated support workflow investigated several possible causes but could not identify a resolution.
-- The developer had to escalate through a support case before completing a basic first-model invocation.
+- Successful authentication and model discovery did not mean that the account could invoke models, but that distinction was not clear during onboarding.
+- The first error suggested verification would normally take less than two hours; subsequent requests instead reported daily token exhaustion despite no successful inference.
+- Model-specific applied quotas were zero, while displayed default quota values were much higher; the console did not explain the account-specific restriction or a direct path to initial access.
+- The Customer Verification page said verification was not required, without clarifying the initial verification error.
+- The automated support workflow did not identify a resolution.
+- The first human support response took approximately five days and did not resolve the restriction.
+- Recommendations to demonstrate high service utilization were difficult to apply to Bedrock inference with an existing allowance of zero. 
+- Suggested Sales engagement or waiting for another billing cycle did not offer a reliable path within the hackathon timeline.
+- The exact cause of the zero quotas, including whether it relates to verification or account eligibility, remained unconfirmed.
 
 **Suggested Improvement**
 
-Provide a clear Amazon Bedrock inference-readiness indicator during onboarding that identifies account activation status, verification restrictions, and effective model inference quotas.
+Provide a Bedrock inference-readiness indicator during account onboarding and model discovery that distinguishes model availability from account-level authorization and effective inference capacity.
 
-When inference is unavailable because of account-level restrictions, return consistent, actionable errors that distinguish verification delays from token consumption or throttling.
+When invocation is blocked, return consistent, actionable errors distinguishing account verification, account eligibility, zero quota allocation, and actual token exhaustion. Explain why applied quotas are zero, what prerequisites must be met, and how developers can obtain an initial minimal nonzero development allowance.
 
-If quotas are temporarily zero, explain the reason, expected availability, and whether developer action is required.
-
-Additionally, surface these restrictions in the Bedrock console before developers attempt their first API request, and provide a direct support escalation path for newly created accounts that remain blocked beyond the advertised verification period.
+For new accounts and time-limited developer programs, provide a clear escalation path and realistic response expectations. If increased account activity or a Sales evaluation is required, specify how that requirement applies when the affected service cannot be used at all.
 
 **Resolution Status**
 
-Pending.
+Unresolved — support case reopened October 21, 2026; awaiting further response.
 
-AWS Support case created October 9, 2026, at 10:26 AM MDT.
+- October 9, 2026, 10:26 AM MDT: Case 179156319400779 opened.
+- October 14, 2026, 12:32 PM MDT: AWS Support responded after approximately five days and relayed Bedrock team recommendations.
+- October 21, 2026: Additional zero model-specific quotas observed; Nova Lite inference failed with a daily-token throttling error.
+- October 21, 2026, 12:17 PM MDT: Case reopened requesting urgent escalation.
 
-No successful Amazon Bedrock inference request has been completed. The cause of the zero quotas and the relationship to account verification remain unconfirmed pending AWS Support's response.
+No successful Amazon Bedrock inference request has been confirmed. The cause of the zero quotas and their relationship, if any, to account verification remain unconfirmed.
 
 
 ---

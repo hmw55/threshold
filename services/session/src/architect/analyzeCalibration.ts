@@ -92,11 +92,7 @@ export async function analyzeCalibration(
       throw new Error("calibration_images_missing");
     }
 
-    const provider = createAiProvider({
-      provider: "ollama",
-      ollamaModel: "gemma3:4b",
-      ollamaTimeoutMs: 120_000,
-    });
+    const provider = createAiProvider();
 
     if (!provider.analyzeImage) {
       throw new Error("vision_provider_unavailable");
@@ -133,7 +129,6 @@ export async function analyzeCalibration(
           "Use an empty objects array if nothing is recognizable.",
         ].join(" "),
         {
-          model: "gemma3:4b",
           systemPrompt:
             "You are a cautious visual inventory system. " +
             "Only identify objects visibly present in the photograph. " +

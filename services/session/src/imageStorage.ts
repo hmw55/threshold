@@ -1,12 +1,31 @@
-
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 
 const STORAGE_ROOT = resolve(
   process.env.THRESHOLD_IMAGE_STORAGE_PATH ??
     "../../.local/threshold/images",
 );
+
+const S3_BUCKET = process.env.THRESHOLD_S3_BUCKET;
+
+const s3 = S3_BUCKET ? new S3Client({}) : null;
+
+function validateStorageKey(storageKey: string): void {
+  if (
+    !/^calibration\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(jpg|png|webp)$/.test(
+      storageKey,
+    )
+  ) {
+    throw new Error("invalid_storage_key");
+  }
+}
 
 export type ImageMimeType =
   | "image/jpeg"
@@ -76,6 +95,19 @@ export async function saveImage(
     `${randomUUID()}.${extension}`,
   ].join("/");
 
+  if (S3_BUCKET && s3) {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: storageKey,
+        Body: buffer,
+        ContentType: mimeType,
+      }),
+    );
+
+    return storageKey;
+  }
+
   const path = resolveStorageKey(storageKey);
 
   await mkdir(resolve(path, ".."), { recursive: true });
@@ -87,11 +119,41 @@ export async function saveImage(
 export async function readImage(
   storageKey: string,
 ): Promise<Buffer> {
+  validateStorageKey(storageKey);
+
+  if (S3_BUCKET && s3) {
+    const response = await s3.send(
+      new GetObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: storageKey,
+      }),
+    );
+
+    if (!response.Body) {
+      throw new Error("image_body_missing");
+    }
+
+    return Buffer.from(await response.Body.transformToByteArray());
+  }
+
   return readFile(resolveStorageKey(storageKey));
 }
 
 export async function removeImage(
   storageKey: string,
 ): Promise<void> {
+  validateStorageKey(storageKey);
+
+  if (S3_BUCKET && s3) {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: S3_BUCKET,
+        Key: storageKey,
+      }),
+    );
+
+    return;
+  }
+
   await rm(resolveStorageKey(storageKey), { force: true });
 }

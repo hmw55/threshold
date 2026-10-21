@@ -1,4 +1,4 @@
-export type AiProviderName = "ollama" | "bedrock";
+export type AiProviderName = "ollama" | "bedrock" | "gemini";
 
 export interface AiGenerationRequest {
   systemPrompt: string;
