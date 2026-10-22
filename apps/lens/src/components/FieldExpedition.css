@@ -532,3 +532,18 @@
 .field-cooperation input { width: 100%; max-width: 20rem; text-transform: uppercase; letter-spacing: .12em; }
 .field-final-vote label { display: flex; align-items: flex-start; gap: .7rem; padding: .7rem; }
 .field-final-vote input[type="radio"] { flex: 0 0 auto; }
+
+/* Final record: cinematic hierarchy without invented outcomes. */
+.field-ending{position:relative;overflow:hidden;padding:clamp(20px,5vw,38px);border:1px solid #4b98a3;border-radius:12px;background:radial-gradient(ellipse at 85% 0%,#20424c 0%,transparent 55%),linear-gradient(160deg,#111d28,#080d14);box-shadow:0 20px 60px #0007;color:#edf6f7}
+.field-ending:before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#79e2eb,transparent)}
+.field-ending-kicker,.field-ending-label,.field-ending-footer{font-size:11px;font-weight:800;letter-spacing:.17em;color:#86cdd4}
+.field-ending-kicker span{color:#8199a5}
+.field-ending h2{font-size:clamp(28px,7vw,48px);line-height:1.1;letter-spacing:.09em;margin:18px 0 10px;overflow-wrap:anywhere}
+.field-ending-subtitle{color:#b7c8d0;font-size:14px;line-height:1.6}
+.field-ending-message{margin:28px 0;padding:20px;border-left:3px solid #8be1e9;background:#0b161f}
+.field-ending-message p{font-size:clamp(16px,4vw,20px);line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;margin:14px 0 0}
+.field-ending-score{margin:28px 0 16px}
+.field-ending-score-row{display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #30434d;padding:12px 0;font-size:15px}
+.field-ending-score-row strong{white-space:nowrap;font-variant-numeric:tabular-nums;color:#c9f0df}
+.field-ending-score-row small{font-size:10px;letter-spacing:.1em;color:#91a9b2}
+.field-ending-footer{margin:24px 0 0;line-height:1.7}

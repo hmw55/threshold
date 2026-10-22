@@ -98,6 +98,7 @@ class ExpeditionScreen(
     private var lastFieldStage: String? = null
     private var fieldChoices = listOf("preserve", "release", "erase")
     private var fieldSelection = 0
+    private var holdSelectRequired = false
 
 
     init {
@@ -360,6 +361,8 @@ class ExpeditionScreen(
         val field = data.optJSONObject("fieldEncounter")
         if (field != null) {
             val fieldStage = field.optString("stage", "survey")
+            holdSelectRequired = field.optBoolean("holdSelect", false) ||
+                field.optString("instruction").contains("HOLD SELECT", ignoreCase = true)
             resultsActions.visibility = if (fieldStage == "complete") VISIBLE else GONE
             if (fieldStage == "complete") resultsGlitch.start() else resultsGlitch.stop()
             val previousFieldStage = lastFieldStage
@@ -456,8 +459,8 @@ class ExpeditionScreen(
             footer.text = if (fieldStage == "cooperation") "LENSES TUNE // SELECT TO SEND TERMINAL PULSE // MENU // NAVIGATION" else "THE ROOM IS THE GAME // MENU // NAVIGATION"
             if (field.optString("transmission").contains("DECEIT DETECTED") && previousFieldStage != fieldStage) interruption.trigger("DECEIT DETECTED")
             refreshGameplayLayout()
-            if (fieldStage == "complete" && !returnToLobbyButton.hasFocus() && !newExpeditionButton.hasFocus()) {
-                post { returnToLobbyButton.requestFocus() }
+            if (fieldStage == "complete" && !resultsActions.hasFocus() && !surveillanceGrid.hasFocus() && !expandedContainer.hasFocus()) {
+                post { if (hasResultsActions() && !resultsActions.hasFocus() && !surveillanceGrid.hasFocus() && !expandedContainer.hasFocus()) returnToLobbyButton.requestFocus() }
             }
             return
         }
@@ -535,6 +538,7 @@ class ExpeditionScreen(
         }
 
         refreshMonitorSelection()
+        monitors[selectedMonitor].requestFocus()
         return true
     }
 
@@ -555,6 +559,7 @@ class ExpeditionScreen(
         surveillanceGrid.visibility = GONE
         expandedContainer.visibility = VISIBLE
         refreshMonitorSelection()
+        monitor.requestFocus()
         return true
     }
 
@@ -590,6 +595,8 @@ class ExpeditionScreen(
 
     fun isMonitorFocused(): Boolean = monitors.any { it.hasFocus() }
 
+    fun hasFocusedControl(): Boolean = isMonitorFocused() || resultsActions.hasFocus()
+
     fun moveDecision(direction: Int): Boolean {
         if (currentPhase != "resolution") return false
         selectedEnding = (selectedEnding + direction + endings.size) % endings.size
@@ -610,6 +617,10 @@ class ExpeditionScreen(
         currentPhase == "field-complete" || currentPhase == "complete"
 
     fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict" || currentPhase == "field-decision" || currentPhase == "field-cooperation"
+
+    /** True only while the expanded terminal is the active pulse control. */
+    fun isExpandedPulseInteraction(): Boolean =
+        expandedMonitor == 3 && currentPhase == "field-cooperation" && selectedFieldVerdict() == "pulse"
     private fun refreshFieldVerdictMonitor() {
         monitors[3].setContent(buildString {
             append(if (currentPhase == "field-cooperation") "SHARED SIGNAL // SELECT TO PULSE\n\n" else "FINAL VERDICT // PUBLIC STANCE\n\n")
@@ -634,6 +645,16 @@ class ExpeditionScreen(
     fun isChoosingTerminal(): Boolean = terminalChoices.isNotEmpty() && !terminalCompleted
 
     fun hasResultsActions(): Boolean = resultsActions.visibility == VISIBLE
+
+    fun requiresHoldSelect(): Boolean = holdSelectRequired && isChoosingFieldVerdict()
+
+    fun showHoldProgress(percent: Int) {
+        footer.text = "HOLD SELECT // ${percent.coerceIn(0, 100)}% // RELEASE TO CANCEL"
+    }
+
+    fun showHoldCancelled() {
+        footer.text = "HOLD CANCELLED // PRESS AND HOLD SELECT TO TRANSMIT"
+    }
 
     fun focusResultsActions() {
         if (hasResultsActions()) returnToLobbyButton.requestFocus()

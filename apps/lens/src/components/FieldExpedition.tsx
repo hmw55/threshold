@@ -137,7 +137,16 @@ export function FieldExpedition({sessionCode,playerId,playerToken}:Props) {
       {view.responded?<p role="status">RESPONSE RECORDED. Waiting for the other witnesses or the encounter timer.</p>:<>{button('DEFEND: I DID NOT DECEIVE YOU','respond','defend')}{button('CHALLENGE THE ARCHITECT’S INTERPRETATION','respond','challenge')}{d?.outcome&&button('I SAW THE RECOVERED OBJECT IN PERSON','respond','corroborate')}{button('WITHHOLD FURTHER TESTIMONY','respond','withhold')}</>}
     </div>}
     {view.stage==='decision'&&<div className="field-controls"><p>Your majority decides. A split or missing vote resolves by a recorded challenge to the Architect, then cooperation success. The ending will explain the rule.</p>{view.hasVoted?<p role="status">VOTE SEALED. Waiting for remaining votes or the timer.</p>:<>{button('PRESERVE THE CONTESTED ARCHIVE','vote','preserve')}{button('RELEASE THE RECORD TO THE WITNESSES','vote','release')}{button('CUT THE ARCHITECT’S NARRATIVE ACCESS','vote','erase')}</>}</div>}
-    {view.stage==='complete'&&<div className="field-ending"><h2>{view.ending?.toUpperCase()}</h2><pre className="field-ending-transmission">{view.summary}</pre></div>}
+    {view.stage==='complete'&&<section className="field-ending" aria-label="Expedition outcome">
+      <div className="field-ending-kicker">TRANSMISSION CLOSED <span> // FINAL RECORD</span></div>
+      <h2>{view.ending?.replace(/[-_]/g,' ').toUpperCase()||'RECORD SEALED'}</h2>
+      <p className="field-ending-subtitle">The record reflects decisions and evidence from this expedition.</p>
+      <div className="field-ending-message"><div className="field-ending-label">THE ARCHITECT // FINAL TRANSMISSION</div><p>{view.summary||'No final transmission was recorded.'}</p></div>
+      <div className="field-ending-score"><div className="field-ending-label">WITNESS SCORES</div>
+        {Object.entries(view.scores).length?Object.entries(view.scores).sort((a,b)=>b[1]-a[1]).map(([id,score])=><div className="field-ending-score-row" key={id}><span>{view.players.find(p=>p.id===id)?.name||'WITNESS'}</span><strong>{score.toLocaleString()} <small>PTS</small></strong></div>):<p>No scores recorded.</p>}
+      </div>
+      <p className="field-ending-footer">END OF SIGNAL // Review the evidence journal below.</p>
+    </section>}
     <details className="field-log" open={view.stage==='confrontation'}><summary>EVIDENCE JOURNAL // {view.evidence.length} ACCESSIBLE PHOTOS</summary>
       {view.evidence.map(e=><div key={e.id}><strong>{e.kind.toUpperCase()} // {e.assessment.toUpperCase()}</strong><p>{e.detail}</p><button disabled={busy} onClick={()=>void inspect(e)}>INSPECT ACTUAL PHOTO</button>{view.stage==='confrontation'&&e.playerId===playerId&&!view.responded&&<button disabled={busy} onClick={()=>void act('reveal',undefined,e.id)}>REVEAL THIS PHOTO TO THE WITNESSES</button>}</div>)}
       {openPhoto&&<div><img style={{maxWidth:'100%'}} src={openPhoto.url} alt={`Actual submitted evidence ${openPhoto.id}`}/><button onClick={()=>setOpenPhoto(null)}>CLOSE IMAGE</button></div>}

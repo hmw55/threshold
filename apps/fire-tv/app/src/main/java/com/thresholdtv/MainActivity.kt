@@ -82,6 +82,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        resetRemoteInputState()
         activityResumed = false
         updateAmbientAudio()
         super.onPause()
@@ -94,7 +95,26 @@ class MainActivity : Activity() {
     private var returningToLobby = false
     private var restarting = false
     private var navigationMenu: NavigationMenu? = null
+    private val holdHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var holdSelectDown = false
+    private var holdSelectCompleted = false
+    private var pulseSelectDown = false
+    private val holdSelectDurationMs = 1200L
+    private val holdSelectRunnable = Runnable {
+        if (holdSelectDown && expedition.requiresHoldSelect() && !holdSelectCompleted) {
+            holdSelectCompleted = true
+            expedition.showHoldProgress(100)
+            submitFieldVerdict()
+        }
+    }
 
+
+    private fun resetRemoteInputState() {
+        holdHandler.removeCallbacks(holdSelectRunnable)
+        holdSelectDown = false
+        holdSelectCompleted = false
+        pulseSelectDown = false
+    }
 
     private var sessionCode: String? = null
     private var connectedThresholds: List<ConnectedThreshold> = emptyList()
@@ -363,14 +383,24 @@ class MainActivity : Activity() {
 
     private fun showNavigationMenu() {
         if (navigationMenu?.isShowing == true) return
+        resetRemoteInputState()
         val activeSession = sessionCode != null && state != ThresholdState.Idle
-        val canReturnLobby = state == ThresholdState.Calibrating || state is ThresholdState.Results
+        val canReturnLobby = state == ThresholdState.Calibrating ||
+            state is ThresholdState.Results || state is ThresholdState.Playing || expedition.hasResultsActions()
         val canStartNew = state is ThresholdState.Results || activeSession
         val items = mutableListOf<NavigationMenu.Item>()
         items += NavigationMenu.Item("RESUME EXPEDITION") { navigationMenu?.dismiss(); requestCurrentFocus() }
         items += NavigationMenu.Item("RETURN TO LOBBY", canReturnLobby) {
             navigationMenu?.dismiss()
-            if (state is ThresholdState.Results) returnResultsToLobby() else returnToLobby()
+            when {
+                state is ThresholdState.Results || expedition.hasResultsActions() -> returnResultsToLobby()
+                state is ThresholdState.Playing -> showNavigationConfirmation(
+                    "END EXPEDITION?",
+                    "All connected Lenses will return to the session lobby. This does not delete calibration.",
+                    "RETURN TO LOBBY"
+                ) { returnActiveToLobby() }
+                else -> returnToLobby()
+            }
         }
         items += NavigationMenu.Item("LEAVE EXPEDITION", activeSession) {
             showNavigationConfirmation(
@@ -430,9 +460,27 @@ class MainActivity : Activity() {
     }
 
     private fun returnResultsToLobby() {
-        if (returningToLobby || leaving || connecting || state !is ThresholdState.Results) return
+        if (returningToLobby || leaving || connecting ||
+            (!expedition.hasResultsActions() && state !is ThresholdState.Results)
+        ) return
         returningToLobby = true
         sessions.back(
+            onSuccess = { session ->
+                returningToLobby = false
+                applySessionPhase(session)
+            },
+            onFailure = { message ->
+                returningToLobby = false
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        )
+    }
+
+    private fun returnActiveToLobby() {
+        if (returningToLobby || leaving || connecting || state !is ThresholdState.Playing) return
+        returningToLobby = true
+        sessions.back(
+            endActiveExpedition = true,
             onSuccess = { session ->
                 returningToLobby = false
                 applySessionPhase(session)
@@ -451,6 +499,46 @@ class MainActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val selectKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            event.keyCode == KeyEvent.KEYCODE_ENTER
+
+        // An expanded monitor owns focus, but during Acquire the Signal's
+        // cooperation step it is also the terminal pulse control. Consume
+        // this one Select gesture before the monitor's click listener can
+        // route it back through expansion/collapse handling.
+        if (selectKey && !expedition.requiresHoldSelect() &&
+            (expedition.isExpandedPulseInteraction() || pulseSelectDown)
+        ) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (!pulseSelectDown && event.repeatCount == 0) {
+                    pulseSelectDown = true
+                    submitFieldVerdict()
+                }
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP) {
+                pulseSelectDown = false
+                return true
+            }
+        }
+        if (selectKey && expedition.requiresHoldSelect()) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                if (!holdSelectDown && event.repeatCount == 0) {
+                    holdSelectDown = true
+                    holdSelectCompleted = false
+                    expedition.showHoldProgress(0)
+                    holdHandler.postDelayed(holdSelectRunnable, holdSelectDurationMs)
+                }
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP) {
+                holdHandler.removeCallbacks(holdSelectRunnable)
+                val completed = holdSelectCompleted
+                holdSelectDown = false
+                if (!completed) expedition.showHoldCancelled()
+                return true
+            }
+        }
         if (event.action == KeyEvent.ACTION_DOWN &&
             (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_GUIDE)
         ) {
@@ -472,7 +560,7 @@ class MainActivity : Activity() {
                 return super.dispatchKeyEvent(event)
             }
 
-            if (expedition.isMonitorFocused()) {
+            if (expedition.hasFocusedControl()) {
                 return super.dispatchKeyEvent(event)
             }
 
@@ -507,7 +595,7 @@ class MainActivity : Activity() {
         if (expedition.hasResultsActions()) {
             return super.onKeyDown(keyCode, event)
         }
-        if (expedition.isMonitorFocused()) {
+        if (expedition.hasFocusedControl()) {
             return super.onKeyDown(keyCode, event)
         }
         if (state is ThresholdState.Playing && expedition.isChoosingFieldVerdict()) {
@@ -896,6 +984,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        resetRemoteInputState()
+        holdHandler.removeCallbacksAndMessages(null)
         ambientPlayer?.release()
         ambientPlayer = null
         sessions.stop()

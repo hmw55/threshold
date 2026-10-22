@@ -1,4 +1,3 @@
-
 import { describe, expect, it } from "vitest";
 import { advanceGame } from "../src/game/gameEngine.js";
 import { createInitialGameState } from "../src/game/gameState.js";

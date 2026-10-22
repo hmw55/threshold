@@ -498,7 +498,13 @@ app.post("/sessions/:code/back", (request, response) => {
     return;
   }
 
-  if (session.phase !== "calibrating" && session.phase !== "results") {
+  const witnessComplete = loadGameState(session.code)?.witness?.stage === "complete";
+  const endActiveExpedition = request.body?.endActiveExpedition === true;
+  if (
+    session.phase !== "calibrating" &&
+    session.phase !== "results" &&
+    !(session.phase === "playing" && (witnessComplete || endActiveExpedition))
+  ) {
     response.status(409).json({
       error: "invalid_phase_transition",
     });

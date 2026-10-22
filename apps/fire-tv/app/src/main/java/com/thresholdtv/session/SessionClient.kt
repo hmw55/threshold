@@ -144,13 +144,14 @@ class SessionClient(
             headers = mapOf("x-device-id" to deviceId)
         )
 
-    fun returnToLobby(code: String): ExpeditionSession =
+    fun returnToLobby(code: String, endActiveExpedition: Boolean = false): ExpeditionSession =
         parseSession(
             request(
                 method = "POST",
                 path = "/sessions/${normalizeCode(code)}/back",
                 payload = JSONObject()
                     .put("deviceId", deviceId)
+                    .put("endActiveExpedition", endActiveExpedition)
             ).getJSONObject("session")
         )
 

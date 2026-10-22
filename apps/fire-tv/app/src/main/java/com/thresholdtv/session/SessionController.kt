@@ -345,6 +345,7 @@ class SessionController(
 
 
     fun back(
+        endActiveExpedition: Boolean = false,
         onSuccess: (ExpeditionSession) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -363,7 +364,7 @@ class SessionController(
         Thread {
             try {
                 val updatedSession =
-                    client.returnToLobby(currentCode)
+                    client.returnToLobby(currentCode, endActiveExpedition)
 
                 handler.post {
                     if (!active || leaving || generation != currentGeneration) {
