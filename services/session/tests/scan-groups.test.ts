@@ -34,6 +34,8 @@ describe("Scan group persistence", () => {
       thresholdId: null,
       label: "KITCHEN",
       createdBy: "operative-1",
+      claimedBy: null,
+      claimExpiresAt: null,
       status: "pending",
       createdAt: new Date().toISOString(),
       ...overrides,

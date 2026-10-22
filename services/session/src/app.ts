@@ -1,3 +1,4 @@
+import { registerWitnessRoutes } from "./routes/witnessRoutes.js";
 import { registerSessionRoutes } from "./routes/sessionRoutes.js";
 import { registerCalibrationRoutes } from "./routes/calibrationRoutes.js";
 import { registerFieldRoutes } from "./routes/fieldRoutes.js";
@@ -538,5 +539,6 @@ export type RouteContext = typeof routeContext;
 
 registerSessionRoutes(app, routeContext);
 registerCalibrationRoutes(app, routeContext);
+registerWitnessRoutes(app, routeContext);
 registerFieldRoutes(app, routeContext);
 registerThresholdRoutes(app, routeContext);

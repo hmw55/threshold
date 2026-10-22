@@ -69,6 +69,13 @@ class SessionController(
                     }
                 } catch (e: Exception) {
                     Log.w("Threshold", "Polling failed", e)
+                    if (e is SessionException && e.statusCode in listOf(404, 410)) {
+                        handler.post {
+                            if (active && generation == currentGeneration) {
+                                onError("SESSION EXPIRED // RETURNING TO STANDBY")
+                            }
+                        }
+                    }
                 } finally {
                     handler.post {
                         if (active && generation == currentGeneration) {
@@ -238,6 +245,10 @@ class SessionController(
         onFailure: (String) -> Unit
     ) {
         val currentCode = code ?: run { onFailure("NO ACTIVE EXPEDITION"); return }
+        if (!active || leaving) {
+            onFailure("EXPEDITION NOT AVAILABLE")
+            return
+        }
         val currentGeneration = generation
         Thread {
             try {
@@ -334,6 +345,7 @@ class SessionController(
 
 
     fun back(
+        endActiveExpedition: Boolean = false,
         onSuccess: (ExpeditionSession) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -352,7 +364,7 @@ class SessionController(
         Thread {
             try {
                 val updatedSession =
-                    client.returnToLobby(currentCode)
+                    client.returnToLobby(currentCode, endActiveExpedition)
 
                 handler.post {
                     if (!active || leaving || generation != currentGeneration) {
@@ -385,6 +397,7 @@ class SessionController(
 
 
     fun restart(
+        mode: String = "reuse",
         onSuccess: (ExpeditionSession) -> Unit,
         onFailure: (String) -> Unit
     ) {
@@ -403,7 +416,7 @@ class SessionController(
         Thread {
             try {
                 val updatedSession =
-                    client.restartExpedition(currentCode)
+                    client.restartExpedition(currentCode, mode)
 
                 handler.post {
                     if (!active || leaving || generation != currentGeneration) {

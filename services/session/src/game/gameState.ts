@@ -52,6 +52,7 @@ export interface GameInvestigation {
 import type { FieldState } from "./fieldExpedition.js";
 
 export interface GameState {
+  witness?: import("./witnessExpedition.js").WitnessState;
   field?: FieldState;
   sessionCode: string;
   blueprintId: string;

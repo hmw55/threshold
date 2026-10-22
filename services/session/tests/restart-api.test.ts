@@ -154,6 +154,20 @@ describe("Expedition restart API", () => {
     expect((await readImage(storageKey)).equals(JPEG)).toBe(true);
   });
 
+  it("returns a calibrating expedition to the lobby without recreating it", async () => {
+    const context = await setup();
+
+    const response = await request(app)
+      .post(`/sessions/${context.code}/back`)
+      .send({ deviceId: context.deviceId })
+      .expect(200);
+
+    expect(response.body.session.phase).toBe("lobby");
+    expect(response.body.session.code).toBe(context.code);
+    expect(response.body.session.players).toEqual(context.originalPlayers);
+    expect(response.body.session.thresholds).toEqual(context.originalThresholds);
+  });
+
   it("deletes photographs and scan groups when rescanning", async () => {
     const context = await setup();
     const groupId = await createGroup(context);

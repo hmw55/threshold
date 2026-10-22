@@ -13,7 +13,7 @@ describe("buildArchitectDecisionPrompt", () => {
         category: "furniture",
         description: "A wooden bookshelf.",
         location: "Living room",
-        recognitionStatus: "recognized",
+        recognitionStatus: "confirmed",
         requiresCloserScan: false,
       },
     ],

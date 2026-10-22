@@ -1,0 +1,589 @@
+import { useEffect, useRef, useState } from "react";
+import { normalizeCode, playerHeaders, request } from "../services/apiClient";
+import { FieldEvidenceCamera } from "./FieldEvidenceCamera";
+import "./FieldExpedition.css";
+import "./RoomScanner.css";
+
+type FieldStage = "survey" | "signal" | "exchange" | "fracture" | "verdict" | "complete";
+type FieldAction = "observe" | "examine" | "move" | "rotate" | "reposition" | "safe_alternative";
+
+interface FieldObject { 
+  id: string; 
+  name: string; 
+  location: string 
+}
+
+interface DisplacementView {
+  phase: "awaiting_action" | "awaiting_investigation" | "resolved";
+  role: "actor" | "investigator" | "witness";
+  objectId?: string;
+  instruction: string;
+  outcome: "detected" | "missed" | "inconclusive" | null;
+}
+
+interface FieldView {
+  stage: FieldStage; title: string; transmission: string; revision: number;
+  endingTransmission: string | null;
+  progress: number; total: number; target: FieldObject | null; prompt: string; privateInstruction: string | null;
+  allegiance: {offer: string; accepted: boolean | null; completed: boolean; exposed: boolean} | null;
+  puzzle: {id: string; prompt: string; choices: {id: string; label: string}[]; solvedBy: string[]} | null;
+  mystery: {
+    id: string;
+    title: string;
+    objective: string;
+    suspects: {id: string; kind: string; displayName: string}[];
+    clues: {id: string; publicText: string; requiredForSolution: boolean}[];
+  } | null;
+  architectLog: string[];
+  scoreEvents: {reason: string; points: number}[];
+  role: string; submitted: boolean; received: number; required: number;
+  objects: FieldObject[]; prior: {playerId: string; stage: string; player: string; object: string; observation: string}[];
+  ending: string | null; votes: number; hasVoted: boolean; playerCount: number; elapsedSeconds: number;
+  displacement: DisplacementView | null;
+  caseEvidence: {fragments:string[];label:string} | null;
+  witnessCase: { incident: string; anchorName: string; anchorLocation: string; suspects: {id:string;label:string}[]; isWitness:boolean; votes:number; resolvedIdentity:string|null } | null;
+}
+
+interface Props { sessionCode: string; playerId: string; playerToken: string }
+export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
+  const [view, setView] = useState<FieldView | null>(null);
+  const [objectId, setObjectId] = useState("");
+  const [observation, setObservation] = useState("");
+  const [choice, setChoice] = useState("");
+  const [action, setAction] = useState<FieldAction>("observe");
+  const [detail, setDetail] = useState("");
+  const [exposeTarget, setExposeTarget] = useState<string | null>(null);
+  const [captured, setCaptured] = useState<Blob | null>(null);
+  const [newObject, setNewObject] = useState("");
+  const [newLocation, setNewLocation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [accusedSuspect, setAccusedSuspect] = useState("");
+  const [accusationEvidence, setAccusationEvidence] = useState<string[]>([]);
+
+  const [displacementObjectId, setDisplacementObjectId] = useState("");
+  const [displacementObservation, setDisplacementObservation] = useState("");
+  const [displacementAction, setDisplacementAction] =
+    useState<"move" | "rotate" | "reposition">("reposition");
+  const [displacementCaptured, setDisplacementCaptured] = useState<Blob | null>(null);
+
+  const busyRef = useRef(false);
+  const stageRef = useRef<FieldStage | null>(null);
+  const displacementPhaseRef = useRef<string | null>(null);
+  const base = `/sessions/${normalizeCode(sessionCode)}/field`;
+  const headers = playerHeaders(playerId, playerToken);
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    async function poll() {
+      if (inFlight || busyRef.current) return;
+      inFlight = true;
+      try {
+        const next = await request<FieldView>(base, {headers});
+        if (!active) return;
+        if (stageRef.current !== null && stageRef.current !== next.stage) {
+          setObservation(""); setObjectId("");
+          setFeedback(""); setError("");
+        }
+        stageRef.current = next.stage;
+        const displacementPhase = next.stage === "exchange" && next.displacement
+          ? `${next.displacement.phase}:${next.displacement.role}`
+          : null;
+        if (displacementPhaseRef.current !== displacementPhase) {
+          setDisplacementCaptured(null);
+          setDisplacementObservation("");
+          setDisplacementObjectId("");
+          displacementPhaseRef.current = displacementPhase;
+        }
+
+        if (
+          next.stage === "exchange" &&
+          next.displacement?.role === "actor" &&
+          next.displacement.phase === "awaiting_action" &&
+          next.displacement.objectId
+        ) {
+          setDisplacementObjectId(next.displacement.objectId);
+        }
+
+        setView(next);
+      } catch (e) { if (active) setError(e instanceof Error ? e.message : "Connection interrupted"); }
+      finally { inFlight = false; }
+    }
+    void poll();
+    const timer = window.setInterval(() => { void poll(); }, 1800);
+    return () => { active = false; window.clearInterval(timer); };
+  // Authentication and session identifiers are stable throughout this mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionCode, playerId, playerToken]);
+  async function submit() {
+    if (busyRef.current || !view) return;
+    busyRef.current = true; setBusy(true); setError("");
+    try {
+      const body = new FormData();
+      body.append("objectId", (view.stage === "survey" ? (objectId || view.target?.id) : view.target?.id) || "");
+      body.append("observation", observation);
+      body.append("action", action);
+      if (detail.trim()) body.append("detail", detail.trim());
+      if (captured) body.append("image", captured, "field-evidence.jpg");
+      const result = await request<{accepted: boolean; view: FieldView}>(`${base}/observation`, {
+        method: "POST", headers, body,
+      });
+      setView(result.view); setFeedback("Evidence received. The Architect has updated the shared signal.");
+      setObservation(""); setDetail(""); setCaptured(null); setObjectId("");
+      stageRef.current = result.view.stage;
+    } catch (e) { setError(e instanceof Error ? e.message : "Upload failed. Your evidence is still here; retry."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function submitDisplacement() {
+    if (busyRef.current || !view?.displacement) return;
+
+    const encounter = view.displacement;
+    const isActor =
+      encounter.role === "actor" &&
+      encounter.phase === "awaiting_action";
+
+    const isInvestigator =
+      encounter.role === "investigator" &&
+      encounter.phase === "awaiting_investigation";
+
+    if (!isActor && !isInvestigator) return;
+
+    if (!displacementObjectId) {
+      setError("SELECT AN OBJECT BEFORE SUBMITTING.");
+      return;
+    }
+
+    if (
+      displacementObservation.trim().length < 12 ||
+      displacementObservation.length > 1200
+    ) {
+      setError("DESCRIBE YOUR EVIDENCE IN 12–1,200 CHARACTERS.");
+      return;
+    }
+
+    if (!displacementCaptured) {
+      setError("PHOTOGRAPHIC EVIDENCE IS REQUIRED.");
+      return;
+    }
+
+    busyRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const body = new FormData();
+
+      body.append("objectId", displacementObjectId);
+      body.append("observation", displacementObservation.trim());
+      body.append("image", displacementCaptured, "displacement-evidence.jpg");
+
+      if (isActor) {
+        body.append("action", displacementAction);
+      }
+
+      const endpoint = isActor
+        ? `${base}/displacement/action`
+        : `${base}/displacement/investigate`;
+
+      await request(endpoint, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      const updated = await request<FieldView>(base, { headers });
+
+      setView(updated);
+      setDisplacementObservation("");
+      setDisplacementObjectId("");
+      setDisplacementCaptured(null);
+
+      setFeedback(
+        isActor
+          ? "THE ENVIRONMENT HAS BEEN ALTERED. THE INVESTIGATION BEGINS."
+          : "INVESTIGATION SUBMITTED. THE ARCHITECT IS EVALUATING THE RESULT.",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "DISPLACEMENT EVIDENCE COULD NOT BE SUBMITTED.",
+      );
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function answerPuzzle(choiceId: string, evidenceIds: string[]) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const result = await request<{
+        correct: boolean;
+        outcome: "solved" | "partial" | "incorrect";
+        narration: string;
+        view: FieldView;
+      }>(`${base}/puzzle`, {
+        method: "POST",
+        headers: {...headers, "Content-Type": "application/json"},
+        body: JSON.stringify({choiceId, evidenceIds}),
+      });
+
+      setView(result.view);
+      setFeedback(result.narration);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "DEDUCTION NOT RECEIVED");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function answerAllegiance(accepted: boolean) {
+    try { const result = await request<{view: FieldView}>(`${base}/allegiance`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({accepted})}); setView(result.view); }
+    catch (e) { setError(e instanceof Error ? e.message : "PRIVATE DIRECTIVE UNAVAILABLE"); }
+  }
+  async function expose(targetId = exposeTarget) {
+    if (!targetId) return;
+    try { const result = await request<{exposed: boolean; narration: string; view: FieldView}>(`${base}/expose`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({targetPlayerId: targetId})}); setView(result.view); setFeedback(result.narration); setExposeTarget(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "EXPOSURE NOT RECEIVED"); }
+  }
+  async function registerObject() {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setError("");
+    try {
+      const result = await request<{object: FieldObject}>(`${base}/objects`, {
+        method: "POST", headers, body: JSON.stringify({name: newObject, location: newLocation}),
+      });
+      setObjectId(result.object.id);
+      setNewObject(""); setNewLocation("");
+      setFeedback(`Confirmed ${result.object.name}. You can now investigate it.`);
+      const next = await request<FieldView>(base, {headers});
+      setView(next);
+    } catch (e) { setError(e instanceof Error ? e.message : "Object could not be confirmed."); }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+  async function vote() {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy(true); setError("");
+    try {
+      const result = await request<{view: FieldView}>(`${base}/verdict`, {
+        method: "POST", headers, body: JSON.stringify({choice}),
+      });
+      setView(result.view); setFeedback("Your decision has been transmitted.");
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Decision not received. Try again.";
+      if (message.toLowerCase().includes("failed to fetch")) {
+        try {
+          await new Promise(resolve => window.setTimeout(resolve, 500));
+          const recovered = await request<FieldView>(base, {headers});
+          if (recovered.hasVoted || recovered.stage === "complete") {
+            setView(recovered); setFeedback("The Architect received your decision after the connection recovered.");
+          } else {
+            const retry = await request<{view: FieldView}>(`${base}/verdict`, {method: "POST", headers, body: JSON.stringify({choice})});
+            setView(retry.view); setFeedback("Your decision has been transmitted.");
+          }
+        } catch { setError("The Architect could not confirm this decision. Check the connection and transmit again."); }
+      } else setError(message);
+    }
+    finally { busyRef.current = false; setBusy(false); }
+  }
+  if (!view) return <section className="field-panel"><p>CONNECTING TO THE ARCHITECT...</p>{error && <p role="alert">{error}</p>}</section>;
+  const voted = view.stage === "verdict" && view.hasVoted;
+  return <section className="field-panel">
+    <div className="field-eyebrow">THE LAST WITNESS // {view.role}</div>
+    <div className="field-meter"><div style={{width: `${100 * view.progress / view.total}%`}} /></div>
+    <h1>{view.title}</h1>
+    <blockquote className="field-transmission">{view.transmission}</blockquote>
+    {view.witnessCase && <aside className="field-controls"><strong>THE INCIDENT // {view.witnessCase.anchorName.toUpperCase()}</strong><p>{view.witnessCase.incident}</p><p>LOCATION // {view.witnessCase.anchorLocation}</p>{view.witnessCase.isWitness && <p className="field-private">CLASSIFIED // YOU ARE THE LAST WITNESS. You know what you experienced, not the entire cause. Decide what to share.</p>}</aside>}
+    {view.privateInstruction && (
+      <details className="field-private field-directive">
+        <summary>
+          <span>PRIVATE DIRECTIVE // {view.role.toUpperCase()}</span>
+          <span className="field-directive-toggle" aria-hidden="true">+</span>
+        </summary>
+        <div className="field-directive-body">
+          <p>{view.privateInstruction}</p>
+        </div>
+      </details>
+    )}
+    {view.allegiance && view.allegiance.accepted === null && <aside className="field-allegiance"><strong>ARCHITECT OFFER // PRIVATE</strong><p>{view.allegiance.offer === "deceive" ? "Mislead the shared record once. If another operative exposes the inconsistency, they gain the reward instead." : "Cooperate with the Architect's evidence trail for extra points."}</p><div><button type="button" onClick={() => void answerAllegiance(true)}>ACCEPT</button><button type="button" onClick={() => void answerAllegiance(false)}>REJECT</button></div></aside>}
+    {view.allegiance && view.allegiance.accepted === null
+      ? <section className="field-offer-gate" aria-live="polite">
+          <span className="field-offer-gate-signal">AWAITING OPERATIVE DECISION</span>
+          <p>The Architect is waiting for your answer.</p>
+          <p className="field-offer-gate-hint">Your investigation will resume after you decide.</p>
+        </section>
+      : view.stage === "complete" ? <div className="field-ending">
+      <h2>THE ROOM IS STILL HERE.</h2>
+      <p>FINAL DECISION // {view.ending?.toUpperCase()}</p>
+      <pre className="field-ending-transmission">
+        {view.endingTransmission ?? "FINAL TRANSMISSION UNAVAILABLE."}
+      </pre>
+      <p>END OF TRANSMISSION</p>
+    </div> : <>
+      {view.stage !== "fracture" && view.stage !== "verdict" && <p className="field-prompt">{view.prompt}</p>}
+      {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">REQUIRED INVESTIGATION // {view.target.name} · {view.target.location}</p>}
+      {view.stage === "exchange" && view.displacement && (
+        <section className="field-controls field-displacement">
+          <div className="field-eyebrow">
+            CLASSIFIED ENCOUNTER // DISPLACEMENT
+          </div>
+
+          <h2>
+            {view.displacement.phase === "resolved"
+              ? "THE ANOMALY HAS BEEN RESOLVED"
+              : view.displacement.role === "actor"
+                ? "ALTER THE EVIDENCE"
+                : view.displacement.role === "investigator"
+                  ? "INVESTIGATE THE ANOMALY"
+                  : "AN ENVIRONMENTAL ANOMALY"}
+          </h2>
+
+          <p>{view.displacement.instruction}</p>
+
+          {view.displacement.role === "actor" &&
+            view.displacement.phase === "awaiting_action" && (
+              <>
+                <label htmlFor="displacement-action">
+                  PHYSICAL ACTION
+                </label>
+
+                <select
+                  id="displacement-action"
+                  value={displacementAction}
+                  disabled={busy}
+                  onChange={e =>
+                    setDisplacementAction(
+                      e.target.value as "move" | "rotate" | "reposition",
+                    )
+                  }
+                >
+                  <option value="reposition">Reposition safely</option>
+                  <option value="rotate">Rotate safely</option>
+                  <option value="move">Move safely</option>
+                </select>
+              </>
+            )}
+
+          {view.displacement.role === "investigator" &&
+            view.displacement.phase === "awaiting_investigation" && (
+              <>
+                <label htmlFor="displacement-object">
+                  WHICH OBJECT CHANGED?
+                </label>
+
+                <select
+                  id="displacement-object"
+                  value={displacementObjectId}
+                  disabled={busy}
+                  onChange={e => setDisplacementObjectId(e.target.value)}
+                >
+                  <option value="">SELECT A SUSPECTED OBJECT</option>
+
+                  {view.objects.map(object => (
+                    <option key={object.id} value={object.id}>
+                      {object.name} — {object.location}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+          {(
+            (view.displacement.role === "actor" &&
+              view.displacement.phase === "awaiting_action") ||
+            (view.displacement.role === "investigator" &&
+              view.displacement.phase === "awaiting_investigation")
+          ) && (
+            <>
+              <label htmlFor="displacement-observation">
+                DESCRIBE YOUR EVIDENCE
+              </label>
+
+              <textarea
+                id="displacement-observation"
+                rows={4}
+                maxLength={1200}
+                value={displacementObservation}
+                disabled={busy}
+                onChange={e => setDisplacementObservation(e.target.value)}
+                placeholder="Describe what you physically changed or independently observed."
+              />
+
+              <div className="field-displacement-camera">
+                <strong>PHOTOGRAPHIC EVIDENCE</strong>
+                <FieldEvidenceCamera
+                  key={`displacement-${view.displacement.phase}-${view.displacement.role}`}
+                  label="DISPLACEMENT EVIDENCE"
+                  disabled={busy}
+                  onCapture={setDisplacementCaptured}
+                />
+              </div>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !displacementObjectId ||
+                  !displacementCaptured ||
+                  displacementObservation.trim().length < 12
+                }
+                onClick={() => void submitDisplacement()}
+              >
+                {busy ? "TRANSMITTING..." : "SUBMIT DISPLACEMENT EVIDENCE"}
+              </button>
+            </>
+          )}
+
+          {view.displacement.phase === "awaiting_action" &&
+            view.displacement.role !== "actor" && (
+              <p role="status">
+                AWAITING ENVIRONMENTAL CHANGE...
+              </p>
+            )}
+
+          {view.displacement.phase === "awaiting_investigation" &&
+            view.displacement.role !== "investigator" && (
+              <p role="status">
+                INVESTIGATION IN PROGRESS...
+              </p>
+            )}
+
+          {view.displacement.phase === "resolved" && (
+            <p role="status">
+              RESULT // {view.displacement.outcome?.toUpperCase() ?? "RECORDED"}
+            </p>
+          )}
+        </section>
+      )}
+      {view.stage === "fracture" && view.caseEvidence && <section className="field-controls"><strong>{view.caseEvidence.label}</strong>{view.caseEvidence.fragments.map((fragment, index) => <p key={index}>{fragment}</p>)}</section>}
+      {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
+        <div className="field-puzzle field-accusation">
+          <blockquote className="field-transmission" aria-label="Architect evidence challenge">
+            <strong>ARCHITECT // EVIDENCE CHALLENGE</strong>
+            <p>{view.prompt}</p>
+          </blockquote>
+          <strong>PHYSICAL RECONSTRUCTION // VERIFY THE RECORD</strong>
+          <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
+          <p>{view.puzzle.prompt}</p>
+
+          <h3>01 // YOUR ROOM RECORDS</h3>
+          <p>Select the record matching the physical action. Compare your observation with the object in the room.</p>
+          <div className="field-evidence-list">
+            {view.mystery?.clues.map((clue, index) => (
+              <label className="field-evidence-card" key={clue.id}>
+                <input
+                  type="checkbox"
+                  checked={accusationEvidence.includes(clue.id)}
+                  disabled={busy}
+                  onChange={() => setAccusationEvidence(current =>
+                    current.includes(clue.id)
+                      ? current.filter(id => id !== clue.id)
+                      : [...current, clue.id]
+                  )}
+                />
+                <span>
+                  <strong>RECORD {String(index + 1).padStart(2, "0")}</strong>
+                  <span>{clue.publicText}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          <h3>02 // WHICH ACTION MATCHES?</h3>
+          <div className="field-suspect-list">
+            {view.puzzle.choices.map(item => (
+              <label className="field-suspect-card" key={item.id}>
+                <input
+                  type="radio"
+                  name="field-accused-suspect"
+                  checked={accusedSuspect === item.id}
+                  disabled={busy}
+                  onChange={() => { setAccusedSuspect(item.id); setAccusationEvidence([item.id]); }}
+                />
+                <span>{item.label}</span>
+              </label>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            disabled={busy || !accusedSuspect || accusationEvidence.length === 0}
+            onClick={() => void answerPuzzle(accusedSuspect, accusationEvidence)}
+          >
+            {busy ? "TRANSMITTING..." : "SUBMIT RECONSTRUCTION"}
+          </button>
+        </div>
+      )}
+      {view.stage === "survey" && <details className="field-log"><summary>CONFIRM ANOTHER REAL OBJECT OR ROOM</summary>
+        <div className="field-controls">
+          <label htmlFor="field-new-object">OBJECT YOU CAN ACTUALLY SEE</label>
+          <input id="field-new-object" value={newObject} maxLength={80} onChange={e => setNewObject(e.target.value)} placeholder="e.g. lamp, dog bed, table" />
+          <label htmlFor="field-new-location">WHERE IT REALLY IS</label>
+          <input id="field-new-location" value={newLocation} maxLength={80} onChange={e => setNewLocation(e.target.value)} placeholder="e.g. living room" />
+          <button disabled={busy || newObject.trim().length < 2 || newLocation.trim().length < 2} onClick={() => void registerObject()}>CONFIRM REAL OBJECT</button>
+        </div>
+      </details>}
+      {view.stage === "verdict" && view.witnessCase ? <div className="field-controls">
+        <strong>FINAL BALLOT // WHO WAS THE LAST WITNESS?</strong>
+        <p>Vote for the person or entity who experienced the fictional incident. Witness identity is not the same as responsibility.</p>
+        {view.witnessCase.suspects.map(suspect => <label key={suspect.id}><input type="radio" name="witness-ballot" value={suspect.id} checked={choice === suspect.id} disabled={busy || voted} onChange={() => setChoice(suspect.id)} /> {suspect.label}</label>)}
+        <button disabled={busy || voted || !choice} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "CAST WITNESS BALLOT"}</button>
+        <p>{view.votes} / {view.required} votes received</p>
+      </div> : view.stage === "verdict" ? <div className="field-controls">
+        <p>Choose what happens to the evidence collected here.</p>
+        <label><input type="radio" name="verdict" value="preserve" checked={choice === "preserve"} onChange={() => setChoice("preserve")}/> Preserve the record</label>
+        <label><input type="radio" name="verdict" value="release" checked={choice === "release"} onChange={() => setChoice("release")}/> Release the truth to the witnesses</label>
+        <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} onChange={() => setChoice("erase")}/> Erase the Architect's copy</label>
+        <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
+        <p>{view.votes} / {view.required} decisions received</p>
+      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal", "exchange"].includes(view.stage) ? (
+        view.stage === "exchange" && view.displacement && view.displacement.phase !== "resolved"
+          ? <p className="field-prompt" role="status">Complete the Displacement encounter before continuing the shared investigation.</p>
+          : 
+        view.submitted
+          ? <div className="field-controls" role="status">
+              <strong>EVIDENCE RECEIVED</strong>
+              <p>Your investigation is recorded. Awaiting the remaining witnesses.</p>
+              <p>{view.received} / {view.required} reports received</p>
+            </div>
+          : <div className="field-controls">
+        {view.objects.length === 0 ? <p role="alert">No confirmed objects yet. Use “Discover another real object or room” above to confirm one before continuing.</p> : <>
+          <label htmlFor="field-object">REAL OBJECT TO INVESTIGATE</label>
+          <select id="field-object" disabled={view.stage !== "survey"} value={(view.stage === "survey" ? (objectId || view.target?.id) : view.target?.id) || ""} onChange={e => setObjectId(e.target.value)}>
+            {view.objects.map(o => <option key={o.id} value={o.id}>{o.name} — {o.location}</option>)}
+          </select>
+        <label htmlFor="field-action">PHYSICAL INTERACTION</label>
+        <select id="field-action" value={action} onChange={e => setAction(e.target.value as FieldAction)}>
+          <option value="observe">Observe in place</option><option value="examine">Examine a close-up detail</option><option value="move">Move safely</option><option value="rotate">Rotate safely</option><option value="reposition">Reposition safely</option><option value="safe_alternative">Safe alternative: describe without handling</option>
+        </select>
+        <small>Never move fragile, hot, sharp, heavy, private, or unsafe objects. Use the safe alternative when unsure.</small>
+        <label htmlFor="field-observation">WHAT DID YOU ACTUALLY SEE OR CHANGE?</label>
+        <textarea id="field-observation" rows={5} maxLength={1200} value={observation} onChange={e => setObservation(e.target.value)} placeholder="What did you actually observe or do? What changed, or what did you discover?" />
+          <label htmlFor="field-detail">CLOSE-UP DETAIL (YEAR, MODEL, MARKING, OR OTHER LEGIBLE FACT)</label>
+          <input id="field-detail" value={detail} maxLength={240} onChange={e => setDetail(e.target.value)} placeholder="Only enter a detail you can read or verify." />
+          <FieldEvidenceCamera
+            key={`observation-${view.stage}-${view.target?.id ?? "none"}`}
+            label="CLOSE-UP EVIDENCE"
+            disabled={busy}
+            onCapture={setCaptured}
+          />
+          <button disabled={busy || observation.trim().length < 12 || !view.objects.length || (["examine", "move", "rotate", "reposition"].includes(action) && !captured)} onClick={() => void submit()}>{busy ? "TRANSMITTING..." : "SUBMIT VERIFIED REPORT"}</button>
+          <small>Photos support the report. The Architect accepts only legible, grounded evidence and may ask you to retry.</small>
+        </>}
+      </div>
+      ) : null}
+    </>}
+    {error && <p className="field-error" role="alert">{error}</p>}
+    {feedback && <p className="field-feedback" role="status">{feedback}</p>}
+    {view.prior.length > 0 && <details className="field-log"><summary>RECENT WITNESS RECORDS ({view.prior.length})</summary>
+      {view.prior.map((r,i) => <div key={`${r.stage}-${i}`}><strong>{r.player} // {r.object}</strong><p>{r.observation}</p>{r.playerId !== playerId && <button type="button" onClick={() => { setExposeTarget(r.playerId); void expose(r.playerId); }}>EXPOSE INCONSISTENCY</button>}</div>)}
+    </details>}
+  </section>;
+}

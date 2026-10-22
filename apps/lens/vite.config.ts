@@ -7,5 +7,11 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: [".trycloudflare.com"],
+    proxy: {
+      "/sessions": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+      },
+    },
   },
 });

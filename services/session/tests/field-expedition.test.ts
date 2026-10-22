@@ -178,7 +178,7 @@ describe("physical reality first director", () => {
 
 
   it("rejects an unsupported accusation without advancing or awarding points", () => {
-    let state = startFieldExpedition("test-unsupported", players.slice(0, 1), confirmed);
+    let state = startFieldExpedition("test-unsupported");
 
     state = submitFieldObservation(state, {
       playerId: "p1",

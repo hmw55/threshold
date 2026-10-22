@@ -17,7 +17,7 @@ const environment: ModelEnvironment = {
       category: "furniture",
       description: "A wooden bookshelf containing books.",
       location: "Living room",
-      recognitionStatus: "recognized",
+      recognitionStatus: "confirmed",
       requiresCloserScan: false,
     },
     {
@@ -27,7 +27,7 @@ const environment: ModelEnvironment = {
       category: "furniture",
       description: "A wooden table in front of the couch.",
       location: "Living room",
-      recognitionStatus: "recognized",
+      recognitionStatus: "confirmed",
       requiresCloserScan: false,
     },
   ],

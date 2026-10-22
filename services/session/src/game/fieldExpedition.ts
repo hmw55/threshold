@@ -1,3 +1,4 @@
+import { fragmentForPlayer } from "./environmentalCase.js";
 import {
   createLastWitnessCase,
   evaluateMysteryAccusation,
@@ -12,6 +13,7 @@ import {
 export type FieldStage = "survey" | "signal" | "exchange" | "fracture" | "verdict" | "complete";
 export type FieldChoice = "preserve" | "release" | "erase";
 export type FieldAction = "observe" | "examine" | "move" | "rotate" | "reposition" | "safe_alternative";
+
 export interface FieldRecord {
   id: string;
   stage: FieldStage;
@@ -26,7 +28,40 @@ export interface FieldRecord {
 }
 export interface FieldScoreEvent { playerId: string; reason: string; points: number; createdAt: number; }
 export interface FieldAllegiance { offer: "cooperate" | "deceive" | "conceal" | "expose"; accepted: boolean | null; completed: boolean; exposed: boolean; }
-export interface FieldPuzzle { id: string; prompt: string; choices: { id: string; label: string }[]; answerId: string; solvedBy: string[]; }
+
+export interface FieldPuzzle { 
+  id: string; 
+  prompt: string; 
+  choices: { 
+    id: string; 
+    label: string 
+  }[]; 
+  answerId: string; 
+  solvedBy: string[]; 
+}
+
+export type DisplacementPhase =
+  | "awaiting_action"
+  | "awaiting_investigation"
+  | "resolved";
+
+export interface FieldDisplacement {
+  id: string;
+  objectId: string;
+  objectName: string;
+  originalLocation: string;
+  actorId: string;
+  investigatorId: string;
+  phase: DisplacementPhase;
+
+  // Player-submitted evidence is not automatically verified.
+  actionRecordId: string | null;
+  investigationRecordId: string | null;
+
+  outcome: "detected" | "missed" | "inconclusive" | null;
+  resolvedAt: number | null;
+}
+
 export interface FieldState {
   stage: FieldStage;
   revision: number;
@@ -42,10 +77,32 @@ export interface FieldState {
   allegiances: Record<string, FieldAllegiance>;
   puzzle: FieldPuzzle | null;
   architectLog: string[];
+  displacement?: FieldDisplacement | null;
+  displacementEvidence?: FieldRecord[];
+  witnessIdentity?: { id: string; kind: "player" | "architect" | "unknown_witness"; playerId: string | null; anchorObjectId: string; anchorName: string; anchorLocation: string; incident: string; };
+  witnessVotes?: Record<string, string>;
+  reconstructionAttempts?: Record<string, number>;
+  /** Shared code reconstructed from private, environment-bound player fragments. */
+  cooperation?: { objectId: string; objectName: string; fragments: Record<string, string>; submissions: Record<string, string>; solved: boolean; solvedBy: string | null; attempts: Record<string, number> };
+  /** Publicly resolved vote accounting, never a silent first-option fallback. */
+  voteResolution?: string;
+  /** Who made the decisive reconstruction, and how many attempts it took. */
+  reconstructionWinner?: string | null;
 }
-export interface FieldObject { id: string; name: string; location: string; }
-export interface FieldPlayer { id: string; name: string; }
+
+export interface FieldObject { 
+  id: string; 
+  name: string; 
+  location: string; 
+}
+
+export interface FieldPlayer { 
+  id: string; 
+  name: string; 
+}
+
 const stages: FieldStage[] = ["survey", "signal", "exchange", "fracture", "verdict", "complete"];
+
 const stageTitles: Record<FieldStage, string> = {
   survey: "I // THE ROOM REMEMBERS", signal: "II // A SIGNAL IN PLAIN SIGHT",
   exchange: "III // TWO SIDES OF THE SAME ROOM", fracture: "IV // THE ARCHITECT DIVIDES",
@@ -76,12 +133,273 @@ export function startFieldExpedition(code: string, now = Date.now()): FieldState
     allegiances: {},
     puzzle: null,
     architectLog: [],
+    displacement: null,
+    displacementEvidence: [],
+    reconstructionWinner: null,
   };
 }
-export function confirmedObjects(objects: Array<{ id: string; name: string; location: string; recognitionStatus: string }>): FieldObject[] {
+
+export function confirmedObjects(
+  objects: Array<{ id: string; name: string; location: string; recognitionStatus: string }>): FieldObject[] {
   return objects.filter(o => o.recognitionStatus === "confirmed" && o.name.trim().length > 0)
     .map(({id, name, location}) => ({ id, name, location }));
 }
+
+/** Establish fictional incident ground truth exactly once, using confirmed physical anchors.
+ * Never infer an actual historical event from a photo or player testimony.
+ */
+export function initializeWitnessIdentity(
+  state: FieldState, objects: FieldObject[], players: FieldPlayer[],
+): FieldState {
+  if (state.witnessIdentity || !objects.length || !players.length) return state;
+  const anchor = objects[(state.seed >>> 2) % objects.length]!;
+  const options = players.length > 1 ? 3 : 2;
+  const selected = (state.seed >>> 5) % options;
+  const witness = selected === 0 ? "architect" : selected === 1 ? "unknown_witness" : "player";
+  const player = witness === "player" ? players[(state.seed >>> 9) % players.length]! : null;
+  const incident = [
+    `A fictional witness account places an unexplained change near ${anchor.name} in ${anchor.location}.`,
+    `A fictional testimony says ${anchor.name} in ${anchor.location} was not where someone expected it.`,
+    `The Architect's reconstruction marks ${anchor.name} in ${anchor.location} as the last known point of the incident.`,
+  ][(state.seed >>> 12) % 3]!;
+  return {
+    ...state,
+    witnessIdentity: {
+      id: player?.id ?? (witness === "architect" ? "architect" : "unknown"),
+      kind: witness, playerId: player?.id ?? null,
+      anchorObjectId: anchor.id, anchorName: anchor.name, anchorLocation: anchor.location,
+      incident,
+    },
+    witnessVotes: {},
+    reconstructionAttempts: {},
+    revision: state.revision + 1,
+  };
+}
+
+/** Every witness holds one piece of the same code. The code is stable for a session,
+ * but each Lens receives only its own fragment. Sharing is a real multiplayer action.
+ * In solo play the same physical anchor is used for a shorter memory challenge. */
+export function initializeCooperation(state: FieldState, objects: FieldObject[], players: FieldPlayer[]): FieldState {
+  if (state.cooperation || !objects.length || !players.length) return state;
+  const anchor = objects[(state.seed >>> 6) % objects.length]!;
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const fragments: Record<string,string> = {};
+  players.forEach((player, index) => {
+    fragments[player.id] = alphabet[(state.seed + index * 13 + anchor.name.length * 7) % alphabet.length]!;
+  });
+  return { ...state, cooperation: { objectId: anchor.id, objectName: anchor.name,
+    fragments, submissions: {}, solved: false, solvedBy: null, attempts: {} }, revision: state.revision + 1 };
+}
+
+export function submitCooperation(state: FieldState, playerId: string, answer: string, players: FieldPlayer[], now = Date.now()): {state:FieldState;correct:boolean;message:string} {
+  if (state.stage !== "signal" || !state.cooperation || !players.some(p=>p.id===playerId)) throw new Error("cooperation_unavailable");
+  const coop = state.cooperation;
+  if (coop.solved) throw new Error("cooperation_already_solved");
+  const expected = players.map(p=>coop.fragments[p.id] ?? "").join("");
+  const correct = answer.trim().toUpperCase() === expected;
+  const attempts = {...coop.attempts,[playerId]:(coop.attempts[playerId]??0)+1};
+  const cooperation = {...coop,attempts, solved:correct, solvedBy:correct?playerId:null,
+    submissions:correct?{...coop.submissions,[playerId]:answer.trim().toUpperCase()}:coop.submissions};
+  const completedReports = players.every(p=>state.records.some(r=>r.stage==="signal"&&r.playerId===p.id));
+  const nextStage = correct && completedReports ? "exchange" as const : state.stage;
+  return {state:{...state,cooperation,stage:nextStage,revision:state.revision+1,
+    scoreEvents:correct?[...state.scoreEvents,{playerId,reason:"reconstructed the shared witness cipher",points:350,createdAt:now}]:state.scoreEvents,
+    architectLog:[...state.architectLog,correct?"COOPERATIVE SIGNAL // Witnesses reconstructed the shared cipher.":"COOPERATIVE SIGNAL // The submitted cipher did not match the witness fragments."]},
+    correct,message:correct?"SIGNAL RESTORED. The witnesses combined their private fragments.":"SIGNAL REJECTED. Confirm the fragment order with the other witnesses."};
+}
+
+export function initializeFieldDisplacement(
+  state: FieldState,
+  objects: FieldObject[],
+  players: FieldPlayer[],
+): FieldState {
+  if (state.displacement) return state;
+
+  if (players.length < 2 || objects.length === 0) {
+    return state;
+  }
+
+  const actorIndex = state.seed % players.length;
+  const actor = players[actorIndex];
+  const investigator = players[(actorIndex + 1) % players.length];
+  const object = objects[(state.seed >>> 3) % objects.length];
+
+  if (!actor || !investigator || !object) return state;
+
+  return {
+    ...state,
+    displacement: {
+      id: `displacement-${state.seed}`,
+      objectId: object.id,
+      objectName: object.name,
+      originalLocation: object.location,
+      actorId: actor.id,
+      investigatorId: investigator.id,
+      phase: "awaiting_action",
+      actionRecordId: null,
+      investigationRecordId: null,
+      outcome: null,
+      resolvedAt: null,
+    },
+    revision: state.revision + 1,
+  };
+}
+
+export function fieldDisplacementView(
+  state: FieldState,
+  playerId: string | null,
+) {
+  const encounter = state.displacement;
+
+  if (!encounter) return null;
+
+  if (encounter.phase === "resolved") {
+    return {
+      phase: encounter.phase,
+      role: "witness" as const,
+      instruction: "The displacement encounter has concluded.",
+      outcome: encounter.outcome,
+    };
+  }
+
+  if (playerId === encounter.actorId) {
+    return {
+      phase: encounter.phase,
+      role: "actor" as const,
+      objectId: encounter.objectId,
+      instruction:
+        encounter.phase === "awaiting_action"
+          ? `PRIVATE // Safely reposition ${encounter.objectName}. ` +
+            "Capture evidence of its new position. " +
+            "Do not reveal your assignment."
+          : "Your action has been recorded. Await the investigation.",
+      outcome: null,
+    };
+  }
+
+  if (playerId === encounter.investigatorId) {
+    return {
+      phase: encounter.phase,
+      role: "investigator" as const,
+      instruction:
+        encounter.phase === "awaiting_action"
+          ? "Stand by. An environmental anomaly may occur."
+          : "Investigate the environmental change. " +
+            "Submit what you can independently establish.",
+      outcome: null,
+    };
+  }
+
+  return {
+    phase: encounter.phase,
+    role: "witness" as const,
+    instruction:
+      "Observe the environment. Do not assume the Architect is truthful.",
+    outcome: null,
+  };
+}
+
+export function submitDisplacementAction(
+  state: FieldState,
+  playerId: string,
+  record: FieldRecord,
+): FieldState {
+  const encounter = state.displacement;
+
+  if (!encounter || encounter.phase !== "awaiting_action") {
+    throw new Error("displacement_action_unavailable");
+  }
+
+  if (playerId !== encounter.actorId || record.playerId !== playerId) {
+    throw new Error("displacement_actor_unauthorized");
+  }
+
+  if (record.objectId !== encounter.objectId) {
+    throw new Error("displacement_wrong_object");
+  }
+
+  if (!["move", "rotate", "reposition"].includes(record.action)) {
+    throw new Error("displacement_requires_physical_action");
+  }
+
+  if (!record.imageKey) {
+    throw new Error("displacement_photo_required");
+  }
+
+  return {
+    ...state,
+    displacement: {
+      ...encounter,
+      phase: "awaiting_investigation",
+      actionRecordId: record.id,
+    },
+    revision: state.revision + 1,
+  };
+}
+
+export function resolveDisplacementInvestigation(
+  state: FieldState,
+  playerId: string,
+  record: FieldRecord,
+  selectedObjectId: string,
+  now = Date.now(),
+): FieldState {
+  const encounter = state.displacement;
+
+  if (!encounter || encounter.phase !== "awaiting_investigation") {
+    throw new Error("displacement_investigation_unavailable");
+  }
+
+  if (
+    playerId !== encounter.investigatorId ||
+    record.playerId !== playerId
+  ) {
+    throw new Error("displacement_investigator_unauthorized");
+  }
+
+  if (record.objectId !== selectedObjectId) {
+    throw new Error("displacement_evidence_mismatch");
+  }
+
+  if (!record.imageKey) {
+    throw new Error("displacement_investigation_photo_required");
+  }
+
+  const detected = selectedObjectId === encounter.objectId;
+  const outcome = detected ? "detected" : "missed";
+
+  return {
+    ...state,
+    displacement: {
+      ...encounter,
+      phase: "resolved",
+      investigationRecordId: record.id,
+      outcome,
+      resolvedAt: now,
+    },
+    scoreEvents: [
+      ...state.scoreEvents,
+      {
+        playerId: detected
+          ? encounter.investigatorId
+          : encounter.actorId,
+        reason: detected
+          ? "identified the assigned displacement target"
+          : "displacement target was not identified",
+        points: 300,
+        createdAt: now,
+      },
+    ],
+    architectLog: [
+      ...state.architectLog,
+      detected
+        ? "DISPLACEMENT // The investigator identified the assigned object."
+        : "DISPLACEMENT // The investigator selected a different object.",
+    ],
+    revision: state.revision + 1,
+  };
+}
+
 function assignedFieldObject(
   state: FieldState,
   objects: FieldObject[],
@@ -122,45 +440,31 @@ function assignedFieldObject(
 
   return selected;
 }
+
 function buildFieldEndingTransmission(state: FieldState): string {
-  const records = state.records.slice(-3);
-  const evidence = records.length
-    ? records.map(record =>
-        `${record.objectName}: "${record.observation}"`,
-      ).join("\n")
-    : "No witness statements were recovered.";
-
-  switch (state.ending) {
-    case "preserve":
-      return [
-        "THE ARCHITECT // RECORD RETAINED",
-        "Your decision preserves the Architect's copy of the witness record.",
-        "The objects and details below remain part of its account:",
-        evidence,
-        "The record survives. Its interpretation is not guaranteed to be true.",
-      ].join("\n\n");
-
-    case "release":
-      return [
-        "THE ARCHITECT // RECORD RELEASED",
-        "The witness statements pass beyond the Architect's exclusive control.",
-        "These are the observations the witnesses chose to contribute:",
-        evidence,
-        "The statements are shared. Their meaning remains open to challenge.",
-      ].join("\n\n");
-
-    case "erase":
-      return [
-        "THE ARCHITECT // COPY ERASED",
-        "The Architect relinquishes its own copy of the witness record.",
-        "The statements that shaped this decision were:",
-        evidence,
-        "The system's copy is gone. This does not delete photographs or other stored user data.",
-      ].join("\n\n");
-
-    default:
-      return "THE ARCHITECT // NO FINAL DECISION WAS RECORDED";
-  }
+  const tally = {preserve:0,release:0,erase:0};
+  Object.values(state.votes).forEach(v=>{tally[v]++;});
+  const decisions = Object.entries(state.allegiances).map(([id,a])=>
+    `${id.slice(0,8)}: ${a.accepted===null?"no response":a.accepted?`accepted ${a.offer}`:"refused the offer"}${a.exposed?"; exposed":""}`);
+  const room = state.records.slice(0,8).map(r=>`${r.objectName}: ${r.observation}`).join("\n") || "No witness reports";
+  const actual = state.displacement?.outcome === "detected" ? "The investigator identified the changed object."
+    : state.displacement?.outcome === "missed" ? "The actor's physical change escaped identification."
+    : "No competitive encounter was resolved.";
+  return [
+    "THE LAST WITNESS // FINAL TRANSMISSION",
+    `THE ROOM // ${state.witnessIdentity?.anchorName ?? "UNRESOLVED"} was the fictional incident anchor. The physical reports below came from your actual environment.`,
+    `THE CHALLENGE // ${actual}`,
+    `THE SHARED SIGNAL // ${state.cooperation?.solved?"Witnesses combined their private fragments.":"The cooperative cipher was not restored."}`,
+    `THE RECONSTRUCTION // ${state.reconstructionWinner?"A witness selected a supporting physical record.":"No supporting record was established."}`,
+    `THE ARCHITECT'S OFFERS // ${decisions.join(" | ") || "None recorded"}`,
+    `THE VOTE // Preserve ${tally.preserve}; Release ${tally.release}; Erase ${tally.erase}. ${state.voteResolution??"No resolution rule recorded."}`,
+    `FINAL DECISION // ${(state.ending??"undecided").toUpperCase()}`,
+    state.ending==="erase"?"I relinquish my narrative copy; this does not delete stored photos or server records.":
+      state.ending==="release"?"I release the witness account to the people who created it.":
+      "I retain the witness account, but the witnesses have proved my interpretation is not evidence.",
+    `ROOM TESTIMONY (UNVERIFIED) //\n${room}`,
+    "THE ARCHITECT // I can tell you a story. I cannot make your room agree with it.",
+  ].join("\n\n");
 }
 
 export function fieldView(state: FieldState, objects: FieldObject[], players: FieldPlayer[], playerId: string | null) {
@@ -203,8 +507,8 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
           `PREVIOUS WITNESS RECORD // ${previousObservation.objectName}: "${previousObservation.observation}"`,
           `NEXT PHYSICAL TARGET // ${target.name} in ${target.location}.`,
           state.stage === "signal"
-            ? `Inspect ${target.name}. Find a real detail that could support or contradict the earlier observation. Describe what you can actually see; do not assume the objects are connected.`
-            : `Compare ${target.name} with the earlier ${previousObservation.objectName} observation. Look for a specific physical detail that supports, contradicts, or leaves the earlier account unresolved.`,
+            ? `Inspect ${target.name}. Find one distinctive physical detail. Your private cipher fragment is bound to a shared room anchor; exchange fragments with your team after recording the detail.`
+            : `Examine ${target.name} only if needed to test the staged anomaly. Identify what supports, contradicts, or leaves the previous witness record unresolved. Identify what supports, contradicts, or leaves the previous witness record unresolved.`,
           "A witness statement is not independent proof. Report only what you can verify."
         ].join("\n\n")
       : state.stage === "fracture"
@@ -223,7 +527,12 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
             "DECISION // Use the verified case evidence to justify your accusation. Do not invent a connection that the witness records cannot establish."
           ].join("\n\n")
         : prompts[state.stage][(playerIndex + state.seed) % prompts[state.stage].length];
-  const privateInstruction = playerId === null ? null : state.stage === "exchange"
+  const caseFragment = state.witnessIdentity && playerId !== null
+    ? fragmentForPlayer(state.witnessIdentity.kind, {name: state.witnessIdentity.anchorName, location: state.witnessIdentity.anchorLocation}, playerIndex, index)
+    : null;
+  const privateInstruction = playerId === null ? null : state.witnessIdentity?.playerId === playerId
+    ? `CLASSIFIED // YOU ARE THE LAST WITNESS. You recall an unexplained event associated with ${state.witnessIdentity.anchorName} in ${state.witnessIdentity.anchorLocation}. You did not see every cause and you do not know who was responsible. You may disclose or withhold this memory; you are not automatically guilty.`
+    : state.stage === "exchange"
     ? (playerIndex % 2 === 0
       ? "PRIVATE DIRECTIVE // Share the object name, but keep your most important detail to yourself until the other witness reports."
       : "PRIVATE DIRECTIVE // Ask another witness for the missing detail, then verify it against the real object before you report.")
@@ -245,8 +554,33 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
       ? buildFieldEndingTransmission(state)
       : null,
     revision: state.revision, progress: index, total: 5, target,
-    prompt: dynamicPrompt,
-    privateInstruction,
+    prompt: state.witnessIdentity ? `${state.witnessIdentity.incident}\n\n${dynamicPrompt}` : dynamicPrompt,
+    witnessCase: state.witnessIdentity ? {
+      incident: state.witnessIdentity.incident,
+      anchorName: state.witnessIdentity.anchorName,
+      anchorLocation: state.witnessIdentity.anchorLocation,
+      suspects: [ ...players.map(p => ({ id: p.id, label: p.name })), { id: "architect", label: "The Architect" }, { id: "unknown", label: "Unidentified witness" } ],
+      isWitness: playerId !== null && state.witnessIdentity.playerId === playerId,
+      votes: Object.keys(state.witnessVotes ?? {}).length,
+      resolvedIdentity: state.stage === "complete" ? state.witnessIdentity.id : null,
+    } : null,
+    privateInstruction: [privateInstruction, caseFragment].filter(Boolean).join("\n\n") || null,
+    caseEvidence: state.witnessIdentity ? {
+      fragments: state.stage === "fracture" && caseFragment ? [caseFragment] : [],
+      label: "FICTIONAL CASE FRAGMENTS // Compare with actual room records; these are not camera-verified facts.",
+    } : null,
+    cooperation: state.cooperation ? {
+      active: state.stage === "signal", solved: state.cooperation.solved,
+      anchorName: state.cooperation.objectName,
+      fragment: playerId ? state.cooperation.fragments[playerId] ?? null : null,
+      order: players.map(p=>p.name),
+      solvedBy: state.cooperation.solvedBy,
+      attempts: playerId ? state.cooperation.attempts[playerId] ?? 0 : 0,
+    } : null,
+    displacement:
+      ["exchange", "fracture", "verdict", "complete"].includes(state.stage)
+        ? fieldDisplacementView(state, playerId)
+        : null,
     allegiance,
     puzzle: state.puzzle
       ? { ...state.puzzle, answerId: undefined }
@@ -254,9 +588,13 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
     architectLog: playerId === null
       ? publicLog
       : state.architectLog.slice(-5),
-    mystery: state.mystery
-      ? publicLastWitnessCase(state.mystery)
-      : null,
+    mystery: state.witnessIdentity ? {
+      id: `environment-${state.witnessIdentity.anchorObjectId}`,
+      title: "THE LAST WITNESS // THIS HOUSE",
+      objective: `Identify who witnessed the fictional incident at ${state.witnessIdentity.anchorName}.`,
+      suspects: [ ...players.map(p => ({id:p.id,kind:"player",displayName:p.name})), {id:"architect",kind:"architect",displayName:"The Architect"}, {id:"unknown",kind:"unknown_witness",displayName:"Unidentified witness"} ],
+      clues: state.records.map(record => ({id:record.id,publicText:`${record.stage.toUpperCase()} // ${record.objectName} // ${record.action.toUpperCase()}: ${record.observation}`})),
+    } : state.mystery ? publicLastWitnessCase(state.mystery) : null,
     scoreEvents: state.scoreEvents.filter(event => playerId === null || event.playerId === playerId),
     role: playerIndex % 2 === 0
       ? "OBSERVER"
@@ -308,11 +646,21 @@ export function submitFieldObservation(state: FieldState, input: {
   const records = [...state.records, record];
   const contributors = new Set(records.filter(r => r.stage === state.stage).map(r => r.playerId));
   const advances = players.length > 0 && players.every(player => contributors.has(player.id));
-  const next: FieldStage = advances
-    ? state.stage === "survey" ? "signal"
-      : state.stage === "signal" ? "exchange"
-      : "fracture"
-    : state.stage;
+
+  const displacementPending =
+    state.stage === "exchange" &&
+    state.displacement != null &&
+    state.displacement.phase !== "resolved";
+
+  const next: FieldStage =
+    advances && !displacementPending && (state.stage !== "signal" || players.length === 1 || !state.cooperation || state.cooperation.solved)
+      ? state.stage === "survey"
+        ? "signal"
+        : state.stage === "signal"
+          ? "exchange"
+          : "fracture"
+      : state.stage;
+
   const points = action === "examine" ? 150
     : ["move", "rotate", "reposition"].includes(action) ? 125 : 75;
   const scoreEvents = [...state.scoreEvents, {
@@ -321,7 +669,7 @@ export function submitFieldObservation(state: FieldState, input: {
     points,
     createdAt: now,
   }];
-  const puzzle = next === "fracture" && !state.puzzle ? buildFieldPuzzle(records, state.mystery) : state.puzzle;
+  const puzzle = next === "fracture" && !state.puzzle ? buildFieldPuzzle(records, state.mystery, state.witnessIdentity, state.displacement, state.displacementEvidence) : state.puzzle;
   const playerName = players.find(player => player.id === input.playerId)?.name ?? "operative";
   const architectLog = [...state.architectLog,
     `WITNESS RECORD // ${playerName} reported ${input.object.name}: "${observation}". This is a witness statement, not independent proof of the Architect's interpretation.`];
@@ -329,13 +677,58 @@ export function submitFieldObservation(state: FieldState, input: {
   return { ...state, records, stage: next, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
 }
 
+export function advanceFieldAfterDisplacement(
+  state: FieldState,
+  players: FieldPlayer[],
+): FieldState {
+  if (state.stage !== "exchange") return state;
+  if (!state.displacement || state.displacement.phase !== "resolved") {
+    return state;
+  }
+
+  // Displacement itself supplies the physical exchange evidence. Requiring every
+  // witness to fill another unrelated observation form only adds busywork.
+  return {
+    ...state,
+    stage: "fracture",
+    puzzle: state.puzzle ?? buildFieldPuzzle(state.records, state.mystery, state.witnessIdentity, state.displacement, state.displacementEvidence),
+    revision: state.revision + 1,
+  };
+}
+
 function buildFieldPuzzle(
   records: FieldRecord[],
   mystery: LastWitnessCase | undefined,
+  witness?: FieldState["witnessIdentity"],
+  displacement?: FieldDisplacement | null,
+  displacementEvidence: FieldRecord[] = [],
 ): FieldPuzzle | null {
   const evidence = records.filter(record => ["survey", "signal", "exchange"].includes(record.stage));
   if (evidence.length === 0 || !mystery) return null;
 
+  if (witness) {
+    // The correct answer is the action that actually changed the environment,
+    // not a randomly selected observation or a prewritten Architect confession.
+    const change = (displacement?.phase === "resolved" ? displacementEvidence.find(record => record.id === displacement.actionRecordId) : null)
+      ?? evidence.find(record => ["move", "rotate", "reposition"].includes(record.action))
+      ?? evidence.find(record => record.action === "examine")
+      ?? evidence[0]!;
+    const distractors = [...evidence,...displacementEvidence].filter(record=>record.id!==change.id).slice(0,5);
+    const options = [change,...distractors].sort((a,b)=>a.id.localeCompare(b.id));
+    return {
+      id: `reconstruction-${witness.anchorObjectId}`,
+      prompt: ["RECONSTRUCTION // WHICH ACCOUNT SURVIVES?",
+        `The Architect claims that a physical change occurred near ${witness.anchorName} in ${witness.anchorLocation}.`,
+        "That claim is not proof. Compare witness reports with the actual room and the displacement encounter.",
+        "ARCHITECT CLAIM // No witness altered an object during this expedition. Everything you saw was already there.",
+        "CHALLENGE // Is my claim supported? Find the actual submitted record that best tests it. The record can contradict me, but witness testimony and photos still require human interpretation.",
+        "Select the physical-action record, not the loudest accusation. A correct record does not establish who caused the fictional incident."].join("\n\n"),
+      choices: options.map(record=>({id:record.id,label:`${record.objectName} · ${record.observation.slice(0,100)}`})),
+      answerId: change.id,
+      solvedBy: [],
+    };
+
+  }
   // The solution comes from the authored case and its decisive clues,
   // never from counting which physical object received the most reports.
   const caseEvidence = mystery.clues
@@ -377,23 +770,54 @@ export function answerFieldPuzzle(
   outcome: "solved" | "partial" | "incorrect";
   narration: string;
 } {
-  if (!state.puzzle || !state.mystery || state.stage !== "fracture") {
+  if (
+    !state.puzzle ||
+    (!state.witnessIdentity && !state.mystery) ||
+    state.stage !== "fracture"
+  ) {
     throw new Error("puzzle_unavailable");
   }
   if (state.puzzle.solvedBy.includes(playerId)) {
     throw new Error("puzzle_already_solved");
   }
 
-  const validSuspect = state.mystery.suspects.some(suspect => suspect.id === choiceId);
-  const knownEvidence = new Set(state.mystery.clues.map(clue => clue.id));
+  const isReconstruction = Boolean(state.witnessIdentity);
 
-  if (!validSuspect || !Array.isArray(evidenceIds) ||
-      evidenceIds.length !== new Set(evidenceIds).size ||
-      evidenceIds.some(id => typeof id !== "string" || !knownEvidence.has(id))) {
+  if (!isReconstruction && !state.mystery) {
+    throw new Error("puzzle_unavailable");
+  }
+
+  const validSuspect = isReconstruction
+    ? state.puzzle.choices.some(choice => choice.id === choiceId)
+    : state.mystery!.suspects.some(suspect => suspect.id === choiceId);
+
+  const knownEvidence = new Set(
+    isReconstruction
+      ? [...state.records,...(state.displacementEvidence??[])].map(record => record.id)
+      : state.mystery!.clues.map(clue => clue.id),
+  );
+
+  if (
+    !validSuspect ||
+    !Array.isArray(evidenceIds) ||
+    evidenceIds.length !== new Set(evidenceIds).size ||
+    evidenceIds.some(
+      id => typeof id !== "string" || !knownEvidence.has(id),
+    )
+  ) {
     throw new Error("invalid_accusation");
   }
 
-  const outcome = evaluateMysteryAccusation(state.mystery, choiceId, evidenceIds);
+  const outcome = isReconstruction
+    ? choiceId === state.puzzle.answerId && evidenceIds.includes(choiceId)
+      ? "solved"
+      : "incorrect"
+    : evaluateMysteryAccusation(
+        state.mystery!,
+        choiceId,
+        evidenceIds,
+      );
+
   const correct = outcome === "solved";
   const puzzle = correct
     ? { ...state.puzzle, solvedBy: [...state.puzzle.solvedBy, playerId] }
@@ -405,10 +829,10 @@ export function answerFieldPuzzle(
     : state.scoreEvents;
 
   const narration = outcome === "solved"
-    ? "Your accusation survives examination. The records converge. The Architect must revise its interpretation."
+    ? "You reconstructed a real physical action from this expedition. The final decision is now unlocked. Your reconstruction establishes a submitted action, not the cause of a fictional incident."
     : outcome === "partial"
       ? "Your suspect is plausible, but the submitted records do not yet establish the full chain of evidence."
-      : "The submitted evidence does not establish responsibility for this incident.";
+      : state.witnessIdentity ? "That record is not the action that changed the room. Compare the Displacement reports and revisit the real objects before trying again." : "The submitted evidence does not establish responsibility for this incident.";
 
   return {
     state: {
@@ -420,6 +844,10 @@ export function answerFieldPuzzle(
           ? "THE ARCHITECT ACCEPTS THE SUPPORTED ACCUSATION."
           : "THE ARCHITECT CHALLENGES THE ACCUSATION."],
       stage: correct ? "verdict" : state.stage,
+      reconstructionWinner: correct
+        ? playerId
+        : (state.reconstructionWinner ?? null),
+      reconstructionAttempts: { ...state.reconstructionAttempts, [playerId]: (state.reconstructionAttempts?.[playerId] ?? 0) + 1 },
       revision: state.revision + 1,
     },
     correct,
@@ -452,21 +880,33 @@ export function exposeFieldAllegiance(state: FieldState, exposerId: string, targ
     narration: "The inconsistency was real. The deceiver loses the Architect's protection; the exposer is rewarded.",
   };
 }
-export function voteFieldEnding(state: FieldState, playerId: string, choice: FieldChoice, players: FieldPlayer[], now = Date.now()): FieldState {
+export function voteFieldEnding(state: FieldState, playerId: string, choice: FieldChoice | string, players: FieldPlayer[], now = Date.now()): FieldState {
   if (state.stage !== "verdict") throw new Error("verdict_unavailable");
-  if (!players.some(p => p.id === playerId)) throw new Error("invalid_player");
+  if (!players.some(p=>p.id===playerId)) throw new Error("invalid_player");
   if (state.votes[playerId]) throw new Error("already_voted");
-  if (!["preserve", "release", "erase"].includes(choice)) throw new Error("invalid_choice");
-  const votes = { ...state.votes, [playerId]: choice };
-  const required = Math.max(1, players.length);
-  if (Object.keys(votes).length < required) return { ...state, votes, revision: state.revision + 1 };
-  const counts = { preserve: 0, release: 0, erase: 0 };
-  for (const vote of Object.values(votes)) counts[vote]++;
-  const ranked = (["preserve", "release", "erase"] as FieldChoice[]).sort((a,b) => counts[b] - counts[a]);
-  const winner = ranked[0] ?? "preserve";
-  const runnerUp = ranked[1] ?? winner;
-  const ending = counts[winner] === counts[runnerUp] ? (state.tvChoice ?? winner) : winner;
-  return { ...state, votes, ending: ending ?? null, stage: "complete", finishedAt: now, revision: state.revision + 1 };
+  if (!["preserve","release","erase"].includes(choice)) throw new Error("invalid_choice");
+  const votes = {...state.votes,[playerId]:choice as FieldChoice};
+  if (Object.keys(votes).length < players.length) return {...state,votes,revision:state.revision+1};
+  const counts:Record<FieldChoice,number>={preserve:0,release:0,erase:0};
+  Object.values(votes).forEach(v=>counts[v]++);
+  const highest = Math.max(...Object.values(counts));
+  const tied = (Object.keys(counts) as FieldChoice[]).filter(k=>counts[k]===highest);
+  // The Architect cannot silently choose a winner. Ties are resolved by
+  // the players' previous actions: exposing deception favors release,
+  // refusing offers favors erase, otherwise preserving the record wins.
+  const exposed = Object.values(state.allegiances).some(a=>a.exposed);
+  const refusals = Object.values(state.allegiances).filter(a=>a.accepted===false).length;
+  const priority:FieldChoice[] = exposed?["release","erase","preserve"]
+    :refusals>0?["erase","release","preserve"]:["preserve","release","erase"];
+  const ending = tied.length === 1
+    ? tied[0]!
+    : state.tvChoice ?? priority.find(k => tied.includes(k))!;
+  const voteResolution = tied.length === 1
+    ? `${ending.toUpperCase()} won the majority (${highest}/${players.length}).`
+    : state.tvChoice
+      ? `SPLIT VOTE (${tied.join(" / ")}). The public Threshold selected ${ending.toUpperCase()} as the deciding outcome.`
+      : `SPLIT VOTE (${tied.join(" / ")}). ${exposed ? "Exposed deception favored RELEASE." : refusals > 0 ? "Refusal of the Architect's offers favored ERASE." : "Without exposure or refusal, PRESERVE held priority."} Result: ${ending.toUpperCase()}.`;
+  return {...state,votes,ending,voteResolution,stage:"complete",finishedAt:now,revision:state.revision+1};
 }
 
 export function setFieldTvChoice(state: FieldState, choice: FieldChoice): FieldState {

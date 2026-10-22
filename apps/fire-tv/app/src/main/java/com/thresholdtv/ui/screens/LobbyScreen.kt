@@ -71,7 +71,7 @@ class LobbyScreen(
     }
 
     private val instructions = terminalText(
-        "Enter this code in Lens.",
+        "Enter this code in Lens.   MENU // NAVIGATION",
         14f,
         ThresholdTheme.Colors.Secondary,
         Gravity.START

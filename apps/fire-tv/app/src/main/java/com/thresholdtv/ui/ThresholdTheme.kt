@@ -13,8 +13,9 @@ object ThresholdTheme {
         val Secondary = Color.rgb(146, 146, 146)
         val Border = Color.rgb(41, 41, 44)
 
-        val GlitchCyan = Color.rgb(0, 235, 255)
-        val GlitchMagenta = Color.rgb(255, 0, 110)
+        // Restrained accents keep the signal legible on a dim television.
+        val GlitchCyan = Color.rgb(92, 190, 190)
+        val GlitchMagenta = Color.rgb(208, 116, 145)
     }
 
     object Typography {

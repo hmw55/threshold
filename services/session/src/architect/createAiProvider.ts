@@ -17,7 +17,7 @@ export function createAiProvider(
 ): AiProvider {
   const provider = config.provider ??
     process.env.THRESHOLD_AI_PROVIDER ??
-    "ollama";
+    (process.env.GEMINI_API_KEY ? "gemini" : "ollama");
 
   if (provider === "ollama") {
     return new OllamaProvider({
