@@ -12,6 +12,7 @@ import {
 export type FieldStage = "survey" | "signal" | "exchange" | "fracture" | "verdict" | "complete";
 export type FieldChoice = "preserve" | "release" | "erase";
 export type FieldAction = "observe" | "examine" | "move" | "rotate" | "reposition" | "safe_alternative";
+
 export interface FieldRecord {
   id: string;
   stage: FieldStage;
@@ -26,7 +27,40 @@ export interface FieldRecord {
 }
 export interface FieldScoreEvent { playerId: string; reason: string; points: number; createdAt: number; }
 export interface FieldAllegiance { offer: "cooperate" | "deceive" | "conceal" | "expose"; accepted: boolean | null; completed: boolean; exposed: boolean; }
-export interface FieldPuzzle { id: string; prompt: string; choices: { id: string; label: string }[]; answerId: string; solvedBy: string[]; }
+
+export interface FieldPuzzle { 
+  id: string; 
+  prompt: string; 
+  choices: { 
+    id: string; 
+    label: string 
+  }[]; 
+  answerId: string; 
+  solvedBy: string[]; 
+}
+
+export type DisplacementPhase =
+  | "awaiting_action"
+  | "awaiting_investigation"
+  | "resolved";
+
+export interface FieldDisplacement {
+  id: string;
+  objectId: string;
+  objectName: string;
+  originalLocation: string;
+  actorId: string;
+  investigatorId: string;
+  phase: DisplacementPhase;
+
+  // Player-submitted evidence is not automatically verified.
+  actionRecordId: string | null;
+  investigationRecordId: string | null;
+
+  outcome: "detected" | "missed" | "inconclusive" | null;
+  resolvedAt: number | null;
+}
+
 export interface FieldState {
   stage: FieldStage;
   revision: number;
@@ -42,10 +76,23 @@ export interface FieldState {
   allegiances: Record<string, FieldAllegiance>;
   puzzle: FieldPuzzle | null;
   architectLog: string[];
+  displacement?: FieldDisplacement | null;
+  displacementEvidence?: FieldRecord[];
 }
-export interface FieldObject { id: string; name: string; location: string; }
-export interface FieldPlayer { id: string; name: string; }
+
+export interface FieldObject { 
+  id: string; 
+  name: string; 
+  location: string; 
+}
+
+export interface FieldPlayer { 
+  id: string; 
+  name: string; 
+}
+
 const stages: FieldStage[] = ["survey", "signal", "exchange", "fracture", "verdict", "complete"];
+
 const stageTitles: Record<FieldStage, string> = {
   survey: "I // THE ROOM REMEMBERS", signal: "II // A SIGNAL IN PLAIN SIGHT",
   exchange: "III // TWO SIDES OF THE SAME ROOM", fracture: "IV // THE ARCHITECT DIVIDES",
@@ -76,12 +123,209 @@ export function startFieldExpedition(code: string, now = Date.now()): FieldState
     allegiances: {},
     puzzle: null,
     architectLog: [],
+    displacement: null,
+    displacementEvidence: [],
   };
 }
-export function confirmedObjects(objects: Array<{ id: string; name: string; location: string; recognitionStatus: string }>): FieldObject[] {
+
+export function confirmedObjects(
+  objects: Array<{ id: string; name: string; location: string; recognitionStatus: string }>): FieldObject[] {
   return objects.filter(o => o.recognitionStatus === "confirmed" && o.name.trim().length > 0)
     .map(({id, name, location}) => ({ id, name, location }));
 }
+
+export function initializeFieldDisplacement(
+  state: FieldState,
+  objects: FieldObject[],
+  players: FieldPlayer[],
+): FieldState {
+  if (state.displacement) return state;
+
+  if (players.length < 2 || objects.length === 0) {
+    return state;
+  }
+
+  const actorIndex = state.seed % players.length;
+  const actor = players[actorIndex];
+  const investigator = players[(actorIndex + 1) % players.length];
+  const object = objects[(state.seed >>> 3) % objects.length];
+
+  if (!actor || !investigator || !object) return state;
+
+  return {
+    ...state,
+    displacement: {
+      id: `displacement-${state.seed}`,
+      objectId: object.id,
+      objectName: object.name,
+      originalLocation: object.location,
+      actorId: actor.id,
+      investigatorId: investigator.id,
+      phase: "awaiting_action",
+      actionRecordId: null,
+      investigationRecordId: null,
+      outcome: null,
+      resolvedAt: null,
+    },
+    revision: state.revision + 1,
+  };
+}
+
+export function fieldDisplacementView(
+  state: FieldState,
+  playerId: string | null,
+) {
+  const encounter = state.displacement;
+
+  if (!encounter) return null;
+
+  if (encounter.phase === "resolved") {
+    return {
+      phase: encounter.phase,
+      role: "witness" as const,
+      instruction: "The displacement encounter has concluded.",
+      outcome: encounter.outcome,
+    };
+  }
+
+  if (playerId === encounter.actorId) {
+    return {
+      phase: encounter.phase,
+      role: "actor" as const,
+      objectId: encounter.objectId,
+      instruction:
+        encounter.phase === "awaiting_action"
+          ? `PRIVATE // Safely reposition ${encounter.objectName}. ` +
+            "Capture evidence of its new position. " +
+            "Do not reveal your assignment."
+          : "Your action has been recorded. Await the investigation.",
+      outcome: null,
+    };
+  }
+
+  if (playerId === encounter.investigatorId) {
+    return {
+      phase: encounter.phase,
+      role: "investigator" as const,
+      instruction:
+        encounter.phase === "awaiting_action"
+          ? "Stand by. An environmental anomaly may occur."
+          : "Investigate the environmental change. " +
+            "Submit what you can independently establish.",
+      outcome: null,
+    };
+  }
+
+  return {
+    phase: encounter.phase,
+    role: "witness" as const,
+    instruction:
+      "Observe the environment. Do not assume the Architect is truthful.",
+    outcome: null,
+  };
+}
+
+export function submitDisplacementAction(
+  state: FieldState,
+  playerId: string,
+  record: FieldRecord,
+): FieldState {
+  const encounter = state.displacement;
+
+  if (!encounter || encounter.phase !== "awaiting_action") {
+    throw new Error("displacement_action_unavailable");
+  }
+
+  if (playerId !== encounter.actorId || record.playerId !== playerId) {
+    throw new Error("displacement_actor_unauthorized");
+  }
+
+  if (record.objectId !== encounter.objectId) {
+    throw new Error("displacement_wrong_object");
+  }
+
+  if (!["move", "rotate", "reposition"].includes(record.action)) {
+    throw new Error("displacement_requires_physical_action");
+  }
+
+  if (!record.imageKey) {
+    throw new Error("displacement_photo_required");
+  }
+
+  return {
+    ...state,
+    displacement: {
+      ...encounter,
+      phase: "awaiting_investigation",
+      actionRecordId: record.id,
+    },
+    revision: state.revision + 1,
+  };
+}
+
+export function resolveDisplacementInvestigation(
+  state: FieldState,
+  playerId: string,
+  record: FieldRecord,
+  selectedObjectId: string,
+  now = Date.now(),
+): FieldState {
+  const encounter = state.displacement;
+
+  if (!encounter || encounter.phase !== "awaiting_investigation") {
+    throw new Error("displacement_investigation_unavailable");
+  }
+
+  if (
+    playerId !== encounter.investigatorId ||
+    record.playerId !== playerId
+  ) {
+    throw new Error("displacement_investigator_unauthorized");
+  }
+
+  if (record.objectId !== selectedObjectId) {
+    throw new Error("displacement_evidence_mismatch");
+  }
+
+  if (!record.imageKey) {
+    throw new Error("displacement_investigation_photo_required");
+  }
+
+  const detected = selectedObjectId === encounter.objectId;
+  const outcome = detected ? "detected" : "missed";
+
+  return {
+    ...state,
+    displacement: {
+      ...encounter,
+      phase: "resolved",
+      investigationRecordId: record.id,
+      outcome,
+      resolvedAt: now,
+    },
+    scoreEvents: [
+      ...state.scoreEvents,
+      {
+        playerId: detected
+          ? encounter.investigatorId
+          : encounter.actorId,
+        reason: detected
+          ? "identified the assigned displacement target"
+          : "displacement target was not identified",
+        points: 300,
+        createdAt: now,
+      },
+    ],
+    architectLog: [
+      ...state.architectLog,
+      detected
+        ? "DISPLACEMENT // The investigator identified the assigned object."
+        : "DISPLACEMENT // The investigator selected a different object.",
+    ],
+    revision: state.revision + 1,
+  };
+}
+
 function assignedFieldObject(
   state: FieldState,
   objects: FieldObject[],
@@ -122,6 +366,7 @@ function assignedFieldObject(
 
   return selected;
 }
+
 function buildFieldEndingTransmission(state: FieldState): string {
   const records = state.records.slice(-3);
   const evidence = records.length
@@ -247,6 +492,10 @@ export function fieldView(state: FieldState, objects: FieldObject[], players: Fi
     revision: state.revision, progress: index, total: 5, target,
     prompt: dynamicPrompt,
     privateInstruction,
+    displacement:
+      ["exchange", "fracture", "verdict", "complete"].includes(state.stage)
+        ? fieldDisplacementView(state, playerId)
+        : null,
     allegiance,
     puzzle: state.puzzle
       ? { ...state.puzzle, answerId: undefined }
@@ -308,11 +557,21 @@ export function submitFieldObservation(state: FieldState, input: {
   const records = [...state.records, record];
   const contributors = new Set(records.filter(r => r.stage === state.stage).map(r => r.playerId));
   const advances = players.length > 0 && players.every(player => contributors.has(player.id));
-  const next: FieldStage = advances
-    ? state.stage === "survey" ? "signal"
-      : state.stage === "signal" ? "exchange"
-      : "fracture"
-    : state.stage;
+
+  const displacementPending =
+    state.stage === "exchange" &&
+    state.displacement != null &&
+    state.displacement.phase !== "resolved";
+
+  const next: FieldStage =
+    advances && !displacementPending
+      ? state.stage === "survey"
+        ? "signal"
+        : state.stage === "signal"
+          ? "exchange"
+          : "fracture"
+      : state.stage;
+
   const points = action === "examine" ? 150
     : ["move", "rotate", "reposition"].includes(action) ? 125 : 75;
   const scoreEvents = [...state.scoreEvents, {
@@ -327,6 +586,33 @@ export function submitFieldObservation(state: FieldState, input: {
     `WITNESS RECORD // ${playerName} reported ${input.object.name}: "${observation}". This is a witness statement, not independent proof of the Architect's interpretation.`];
 
   return { ...state, records, stage: next, revision: state.revision + 1, scoreEvents, puzzle, architectLog };
+}
+
+export function advanceFieldAfterDisplacement(
+  state: FieldState,
+  players: FieldPlayer[],
+): FieldState {
+  if (state.stage !== "exchange") return state;
+  if (!state.displacement || state.displacement.phase !== "resolved") {
+    return state;
+  }
+
+  const submitted = new Set(
+    state.records
+      .filter(record => record.stage === "exchange")
+      .map(record => record.playerId),
+  );
+
+  if (!players.length || !players.every(player => submitted.has(player.id))) {
+    return state;
+  }
+
+  return {
+    ...state,
+    stage: "fracture",
+    puzzle: state.puzzle ?? buildFieldPuzzle(state.records, state.mystery),
+    revision: state.revision + 1,
+  };
 }
 
 function buildFieldPuzzle(

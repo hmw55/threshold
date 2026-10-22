@@ -2,6 +2,13 @@ import type { Express } from "express";
 import type { RouteContext, Session, ExpeditionPhase } from "../app.ts";
 import type { GameMission } from "../game/gameState.js";
 import type { FieldChoice, FieldAction } from "../game/fieldExpedition.js";
+import {
+  advanceFieldAfterDisplacement,
+  initializeFieldDisplacement,
+  submitDisplacementAction,
+  resolveDisplacementInvestigation,
+  type FieldRecord,
+} from "../game/fieldExpedition.js";
 
 export function registerFieldRoutes(app: Express, ctx: RouteContext): void {
   const { startFieldExpedition, confirmedObjects, fieldView, submitFieldObservation, voteFieldEnding, setFieldTvChoice, answerFieldPuzzle, answerFieldAllegiance, exposeFieldAllegiance, completeInteraction, lastWitnessInteractions, contradictionPuzzle, submitContradictionAnswer, submitMissingWitnessAnswer, missingWitnessPuzzle, createHash, randomBytes, randomInt, randomUUID, timingSafeEqual, clearSessions, deleteSession, loadSessions, saveSession, savePlayerCredential, getPlayerCredentialHash, deletePlayerCredential, createScanGroup, getScanGroup, listScanGroups, createScanImage, createEnvironment, listEnvironmentObjects, createEnvironmentObject, confirmEnvironmentObject, reviewEnvironmentObject, listEnvironmentObjectsForSession, createEnvironmentObservation, countScanImages, loadGameState, listScanImages, finalizeScanGroup, saveGameState, claimScanGroup, deleteSessionScanGroups, deleteGameState, resetSessionScanGroupsForReuse, cors, express, multer, detectImageType, saveImage, removeImage, lastWitnessBlueprint, createInitialGameState, advanceGame, completeMission, resolveAnchorPuzzle, investigateAnchor, ArchitectDecisionService, createAiProvider, analyzeCalibration, recoverTransmission, transmissionFragments, reconstructSignal, signalFragments, MAX_THRESHOLDS, ZONE_NAMES, sessions, MAX_SCAN_IMAGE_SIZE, MAX_SCAN_IMAGES, scanImageUpload, evidenceImageUpload, generateSessionCode, createThreshold, findAvailableZoneIndex, readDeviceId, createPlayerToken, hashPlayerToken, verifyPlayerToken, getSession, authenticateExpeditionPlayer, updateSessionStatus, timelinePhaseForFieldStage, PHASE_TRANSITIONS, actTwoInteractions, actThreeInteractions, terminalChallenges, terminalChallenge, fieldContext, ensureField, evaluateFieldAction } = ctx;
@@ -874,11 +881,31 @@ app.get("/sessions/:code/field", (request, response) => {
     response.status(409).json({ error: "game_not_available" }); return;
   }
   const ctx = fieldContext(session.code);
-  if (!ctx) { response.status(409).json({ error: "environment_not_ready" }); return; }
+  
+  if (!ctx) { 
+    response.status(409).json({ 
+      error: "environment_not_ready" 
+    }); 
+    return; 
+  }
+  
   const needsInitialization = !ctx.game.field;
   const field = ensureField(ctx.game);
-  if (needsInitialization) saveGameState(ctx.game);
-  response.json(fieldView(field, ctx.objects, session.players, playerId ?? null));
+
+  const updated = initializeFieldDisplacement(
+    field,
+    ctx.objects,
+    session.players,
+  );
+
+  if (needsInitialization || updated !== field) {
+    ctx.game.field = updated;
+    saveGameState(ctx.game);
+  }
+
+  response.json(
+    fieldView(updated, ctx.objects, session.players, playerId ?? null),
+  );
 });
 
 /** Players can confirm additional real objects after calibration, including rooms without TVs. */
@@ -915,6 +942,387 @@ app.post("/sessions/:code/field/objects", (request, response) => {
     recognitionStatus: "confirmed", observedAt: now });
   response.status(201).json({ object: { id: object.id, name: object.name, location: object.location } });
 });
+
+app.post(
+  "/sessions/:code/field/displacement/action",
+  evidenceImageUpload,
+  async (request, response) => {
+    const code = request.params.code;
+
+    if (typeof code !== "string") {
+      response.status(400).json({ error: "invalid_session_code" });
+      return;
+    }
+
+    const session = getSession(code);
+
+    if (!session) {
+      response.status(404).json({ error: "session_not_found" });
+      return;
+    }
+
+    const playerId = request.header("x-player-id");
+    const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+
+    if (!authenticateExpeditionPlayer(session, playerId, token)) {
+      response.status(401).json({ error: "invalid_player_credentials" });
+      return;
+    }
+
+    if (session.phase !== "playing") {
+      response.status(409).json({ error: "game_not_active" });
+      return;
+    }
+
+    const ctx = fieldContext(session.code);
+
+    if (!ctx || !session.environmentId) {
+      response.status(409).json({ error: "environment_not_ready" });
+      return;
+    }
+
+    const field = ensureField(ctx.game);
+    const encounter = field.displacement;
+
+    if (!encounter || encounter.phase !== "awaiting_action") {
+      response.status(409).json({ error: "displacement_action_unavailable" });
+      return;
+    }
+
+    if (playerId !== encounter.actorId) {
+      response.status(403).json({ error: "displacement_actor_unauthorized" });
+      return;
+    }
+
+    // Do not allow the encounter to begin before the exchange stage.
+    if (field.stage !== "exchange") {
+      response.status(409).json({ error: "displacement_stage_unavailable" });
+      return;
+    }
+
+    const object = ctx.objects.find(
+      (item) => item.id === request.body?.objectId,
+    );
+
+    if (!object || object.id !== encounter.objectId) {
+      response.status(400).json({ error: "displacement_wrong_object" });
+      return;
+    }
+
+    const action = request.body?.action;
+
+    if (
+      action !== "move" &&
+      action !== "rotate" &&
+      action !== "reposition"
+    ) {
+      response.status(400).json({ error: "displacement_requires_physical_action" });
+      return;
+    }
+
+    const observation = request.body?.observation;
+
+    if (
+      typeof observation !== "string" ||
+      observation.trim().length < 12 ||
+      observation.length > 1200
+    ) {
+      response.status(400).json({ error: "invalid_observation" });
+      return;
+    }
+
+    if (!request.file) {
+      response.status(400).json({ error: "displacement_photo_required" });
+      return;
+    }
+
+    const mime = detectImageType(request.file.buffer);
+
+    if (!mime) {
+      response.status(415).json({ error: "unsupported_image" });
+      return;
+    }
+
+    let imageKey: string | null = null;
+
+    try {
+      imageKey = await saveImage(
+        request.file.buffer,
+        session.code,
+        `displacement-${field.revision}`,
+        mime,
+      );
+
+      const record: FieldRecord = {
+        id: randomUUID(),
+        stage: field.stage,
+        playerId: playerId!,
+        objectId: object.id,
+        objectName: object.name,
+        observation: observation.trim(),
+        imageKey,
+        createdAt: Date.now(),
+        action,
+        detail: null,
+      };
+
+      const updated = submitDisplacementAction(
+        field,
+        playerId!,
+        record,
+      );
+
+      // Preserve the submitted evidence for the final case record.
+      ctx.game.field = {
+        ...updated,
+        displacementEvidence: [
+          ...(updated.displacementEvidence ?? []),
+          record,
+        ],
+      };
+
+      ctx.game.tvEvents = [
+        ...(ctx.game.tvEvents ?? []).slice(-19),
+        {
+          id: randomUUID(),
+          type: "transmission",
+          message:
+            "ANOMALY DETECTED // A witness reports that the environment has changed. " +
+            "The investigation is now active.",
+          createdAt: Date.now(),
+        },
+      ];
+
+      saveGameState(ctx.game);
+
+      response.json({
+        accepted: true,
+        view: fieldView(
+          ctx.game.field,
+          ctx.objects,
+          session.players,
+          playerId!,
+        ),
+      });
+    } catch (error) {
+      if (imageKey) {
+        await removeImage(imageKey).catch(() => {});
+      }
+
+      response.status(409).json({
+        error: error instanceof Error
+          ? error.message
+          : "displacement_action_failed",
+      });
+    }
+  },
+);
+
+app.post(
+  "/sessions/:code/field/displacement/investigate",
+  evidenceImageUpload,
+  async (request, response) => {
+    const code = request.params.code;
+
+    if (typeof code !== "string") {
+      response.status(400).json({ error: "invalid_session_code" });
+      return;
+    }
+
+    const session = getSession(code);
+
+    if (!session) {
+      response.status(404).json({ error: "session_not_found" });
+      return;
+    }
+
+    const playerId = request.header("x-player-id");
+    const token = request.header("authorization")?.replace(/^Bearer\s+/i, "");
+
+    if (!authenticateExpeditionPlayer(session, playerId, token)) {
+      response.status(401).json({ error: "invalid_player_credentials" });
+      return;
+    }
+
+    if (session.phase !== "playing") {
+      response.status(409).json({ error: "game_not_active" });
+      return;
+    }
+
+    const context = fieldContext(session.code);
+
+    if (!context || !session.environmentId) {
+      response.status(409).json({ error: "environment_not_ready" });
+      return;
+    }
+
+    const field = ensureField(context.game);
+    const encounter = field.displacement;
+
+    if (!encounter || encounter.phase !== "awaiting_investigation") {
+      response.status(409).json({
+        error: "displacement_investigation_unavailable",
+      });
+      return;
+    }
+
+    if (playerId !== encounter.investigatorId) {
+      response.status(403).json({
+        error: "displacement_investigator_unauthorized",
+      });
+      return;
+    }
+
+    if (field.stage !== "exchange") {
+      response.status(409).json({
+        error: "displacement_stage_unavailable",
+      });
+      return;
+    }
+
+    const selectedObjectId = request.body?.objectId;
+
+    if (typeof selectedObjectId !== "string") {
+      response.status(400).json({ error: "invalid_object_id" });
+      return;
+    }
+
+    // The investigator may select the WRONG object.
+    // It must simply be a confirmed object in this session.
+    const object = context.objects.find(
+      (item) => item.id === selectedObjectId,
+    );
+
+    if (!object) {
+      response.status(400).json({ error: "object_not_confirmed" });
+      return;
+    }
+
+    const observation = request.body?.observation;
+
+    if (
+      typeof observation !== "string" ||
+      observation.trim().length < 12 ||
+      observation.length > 1200
+    ) {
+      response.status(400).json({ error: "invalid_observation" });
+      return;
+    }
+
+    if (!request.file) {
+      response.status(400).json({
+        error: "displacement_investigation_photo_required",
+      });
+      return;
+    }
+
+    const mime = detectImageType(request.file.buffer);
+
+    if (!mime) {
+      response.status(415).json({ error: "unsupported_image" });
+      return;
+    }
+
+    let imageKey: string | null = null;
+
+    try {
+      imageKey = await saveImage(
+        request.file.buffer,
+        session.code,
+        `displacement-investigation-${field.revision}`,
+        mime,
+      );
+
+      const record: FieldRecord = {
+        id: randomUUID(),
+        stage: field.stage,
+        playerId: playerId!,
+        objectId: object.id,
+        objectName: object.name,
+        observation: observation.trim(),
+        imageKey,
+        createdAt: Date.now(),
+        action: "examine",
+        detail: null,
+      };
+
+      const updated = resolveDisplacementInvestigation(
+        field,
+        playerId!,
+        record,
+        selectedObjectId,
+      );
+
+      const outcome = updated.displacement?.outcome;
+      const winnerId =
+        outcome === "detected"
+          ? encounter.investigatorId
+          : encounter.actorId;
+
+      const nextField = advanceFieldAfterDisplacement(
+        {
+          ...updated,
+          displacementEvidence: [
+            ...(updated.displacementEvidence ?? []),
+            record,
+          ],
+        },
+        session.players,
+      );
+
+      context.game.field = nextField;
+      context.game.timelinePhase = timelinePhaseForFieldStage(nextField.stage);
+
+      // Award the winning player once.
+      const winner = context.game.players?.find(
+        (player) => player.playerId === winnerId,
+      );
+
+      if (winner) {
+        winner.score += 300;
+      }
+
+      context.game.tvEvents = [
+        ...(context.game.tvEvents ?? []).slice(-19),
+        {
+          id: randomUUID(),
+          type: "reveal",
+          message:
+            outcome === "detected"
+              ? "DISPLACEMENT RESOLVED // The investigator identified the assigned object. The Architect acknowledges the discovery."
+              : "DISPLACEMENT RESOLVED // The investigator selected a different object. The hidden actor's deception survived.",
+          createdAt: Date.now(),
+        },
+      ];
+
+      saveGameState(context.game);
+
+      response.json({
+        accepted: true,
+        outcome,
+        pointsAwarded: 300,
+        winnerId,
+        view: fieldView(
+          nextField,
+          context.objects,
+          session.players,
+          playerId!,
+        ),
+      });
+    } catch (error) {
+      if (imageKey) {
+        await removeImage(imageKey).catch(() => {});
+      }
+
+      response.status(409).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "displacement_investigation_failed",
+      });
+    }
+  },
+);
 
 app.post("/sessions/:code/field/observation", evidenceImageUpload, async (request, response) => {
   const code = request.params.code;

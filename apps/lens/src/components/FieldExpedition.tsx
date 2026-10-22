@@ -1,11 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { normalizeCode, playerHeaders, request } from "../services/apiClient";
+import { FieldEvidenceCamera } from "./FieldEvidenceCamera";
 import "./FieldExpedition.css";
 import "./RoomScanner.css";
 
 type FieldStage = "survey" | "signal" | "exchange" | "fracture" | "verdict" | "complete";
 type FieldAction = "observe" | "examine" | "move" | "rotate" | "reposition" | "safe_alternative";
-interface FieldObject { id: string; name: string; location: string }
+
+interface FieldObject { 
+  id: string; 
+  name: string; 
+  location: string 
+}
+
+interface DisplacementView {
+  phase: "awaiting_action" | "awaiting_investigation" | "resolved";
+  role: "actor" | "investigator" | "witness";
+  objectId?: string;
+  instruction: string;
+  outcome: "detected" | "missed" | "inconclusive" | null;
+}
+
 interface FieldView {
   stage: FieldStage; title: string; transmission: string; revision: number;
   endingTransmission: string | null;
@@ -24,7 +39,9 @@ interface FieldView {
   role: string; submitted: boolean; received: number; required: number;
   objects: FieldObject[]; prior: {playerId: string; stage: string; player: string; object: string; observation: string}[];
   ending: string | null; votes: number; hasVoted: boolean; playerCount: number; elapsedSeconds: number;
+  displacement: DisplacementView | null;
 }
+
 interface Props { sessionCode: string; playerId: string; playerToken: string }
 export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [view, setView] = useState<FieldView | null>(null);
@@ -34,11 +51,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [action, setAction] = useState<FieldAction>("observe");
   const [detail, setDetail] = useState("");
   const [exposeTarget, setExposeTarget] = useState<string | null>(null);
-  const [cameraActive, setCameraActive] = useState(false);
   const [captured, setCaptured] = useState<Blob | null>(null);
-  const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
   const [newObject, setNewObject] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,8 +59,16 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [feedback, setFeedback] = useState("");
   const [accusedSuspect, setAccusedSuspect] = useState("");
   const [accusationEvidence, setAccusationEvidence] = useState<string[]>([]);
+
+  const [displacementObjectId, setDisplacementObjectId] = useState("");
+  const [displacementObservation, setDisplacementObservation] = useState("");
+  const [displacementAction, setDisplacementAction] =
+    useState<"move" | "rotate" | "reposition">("reposition");
+  const [displacementCaptured, setDisplacementCaptured] = useState<Blob | null>(null);
+
   const busyRef = useRef(false);
   const stageRef = useRef<FieldStage | null>(null);
+  const displacementPhaseRef = useRef<string | null>(null);
   const base = `/sessions/${normalizeCode(sessionCode)}/field`;
   const headers = playerHeaders(playerId, playerToken);
   useEffect(() => {
@@ -64,6 +85,25 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           setFeedback(""); setError("");
         }
         stageRef.current = next.stage;
+        const displacementPhase = next.stage === "exchange" && next.displacement
+          ? `${next.displacement.phase}:${next.displacement.role}`
+          : null;
+        if (displacementPhaseRef.current !== displacementPhase) {
+          setDisplacementCaptured(null);
+          setDisplacementObservation("");
+          setDisplacementObjectId("");
+          displacementPhaseRef.current = displacementPhase;
+        }
+
+        if (
+          next.stage === "exchange" &&
+          next.displacement?.role === "actor" &&
+          next.displacement.phase === "awaiting_action" &&
+          next.displacement.objectId
+        ) {
+          setDisplacementObjectId(next.displacement.objectId);
+        }
+
         setView(next);
       } catch (e) { if (active) setError(e instanceof Error ? e.message : "Connection interrupted"); }
       finally { inFlight = false; }
@@ -74,23 +114,6 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   // Authentication and session identifiers are stable throughout this mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionCode, playerId, playerToken]);
-  useEffect(() => {
-    if (!cameraActive) return;
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("CAMERA UNAVAILABLE. USE THE SAFE DESCRIBE OPTION OR ENABLE CAMERA ACCESS.");
-      return;
-    }
-    let cancelled = false;
-    void navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: "environment"}, width: {ideal: 1920}, height: {ideal: 1080}}})
-      .then(async stream => {
-        if (cancelled) { stream.getTracks().forEach(track => track.stop()); return; }
-        streamRef.current = stream;
-        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
-      })
-      .catch(() => setError("CAMERA UNAVAILABLE. USE THE SAFE DESCRIBE OPTION OR ENABLE CAMERA ACCESS."));
-    return () => { cancelled = true; streamRef.current?.getTracks().forEach(track => track.stop()); streamRef.current = null; };
-  }, [cameraActive]);
-  useEffect(() => () => { if (capturedUrl) URL.revokeObjectURL(capturedUrl); }, [capturedUrl]);
   async function submit() {
     if (busyRef.current || !view) return;
     busyRef.current = true; setBusy(true); setError("");
@@ -105,19 +128,93 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         method: "POST", headers, body,
       });
       setView(result.view); setFeedback("Evidence received. The Architect has updated the shared signal.");
-      setObservation(""); setDetail(""); setCaptured(null); setCapturedUrl(null); setObjectId(""); setCameraActive(false);
+      setObservation(""); setDetail(""); setCaptured(null); setObjectId("");
       stageRef.current = result.view.stage;
     } catch (e) { setError(e instanceof Error ? e.message : "Upload failed. Your evidence is still here; retry."); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  function capture() {
-    const video = videoRef.current;
-    if (!video || video.videoWidth === 0) return;
-    const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext("2d")?.drawImage(video, 0, 0);
-    canvas.toBlob(blob => { if (!blob) return; setCaptured(blob); setCapturedUrl(URL.createObjectURL(blob)); setCameraActive(false); }, "image/jpeg", 0.9);
+
+  async function submitDisplacement() {
+    if (busyRef.current || !view?.displacement) return;
+
+    const encounter = view.displacement;
+    const isActor =
+      encounter.role === "actor" &&
+      encounter.phase === "awaiting_action";
+
+    const isInvestigator =
+      encounter.role === "investigator" &&
+      encounter.phase === "awaiting_investigation";
+
+    if (!isActor && !isInvestigator) return;
+
+    if (!displacementObjectId) {
+      setError("SELECT AN OBJECT BEFORE SUBMITTING.");
+      return;
+    }
+
+    if (
+      displacementObservation.trim().length < 12 ||
+      displacementObservation.length > 1200
+    ) {
+      setError("DESCRIBE YOUR EVIDENCE IN 12–1,200 CHARACTERS.");
+      return;
+    }
+
+    if (!displacementCaptured) {
+      setError("PHOTOGRAPHIC EVIDENCE IS REQUIRED.");
+      return;
+    }
+
+    busyRef.current = true;
+    setBusy(true);
+    setError("");
+
+    try {
+      const body = new FormData();
+
+      body.append("objectId", displacementObjectId);
+      body.append("observation", displacementObservation.trim());
+      body.append("image", displacementCaptured, "displacement-evidence.jpg");
+
+      if (isActor) {
+        body.append("action", displacementAction);
+      }
+
+      const endpoint = isActor
+        ? `${base}/displacement/action`
+        : `${base}/displacement/investigate`;
+
+      await request(endpoint, {
+        method: "POST",
+        headers,
+        body,
+      });
+
+      const updated = await request<FieldView>(base, { headers });
+
+      setView(updated);
+      setDisplacementObservation("");
+      setDisplacementObjectId("");
+      setDisplacementCaptured(null);
+
+      setFeedback(
+        isActor
+          ? "THE ENVIRONMENT HAS BEEN ALTERED. THE INVESTIGATION BEGINS."
+          : "INVESTIGATION SUBMITTED. THE ARCHITECT IS EVALUATING THE RESULT.",
+      );
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "DISPLACEMENT EVIDENCE COULD NOT BE SUBMITTED.",
+      );
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
-  function retake() { setCaptured(null); setCapturedUrl(null); setCameraActive(true); }
+
   async function answerPuzzle(choiceId: string, evidenceIds: string[]) {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -205,7 +302,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     {view.privateInstruction && (
       <details className="field-private field-directive">
         <summary>
-          <span>PRIVATE DIRECTIVE // YOU ARE THE OBSERVER</span>
+          <span>PRIVATE DIRECTIVE // {view.role.toUpperCase()}</span>
           <span className="field-directive-toggle" aria-hidden="true">+</span>
         </summary>
         <div className="field-directive-body">
@@ -230,6 +327,138 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     </div> : <>
       {view.stage !== "fracture" && view.stage !== "verdict" && <p className="field-prompt">{view.prompt}</p>}
       {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">REQUIRED INVESTIGATION // {view.target.name} · {view.target.location}</p>}
+      {view.stage === "exchange" && view.displacement && (
+        <section className="field-controls field-displacement">
+          <div className="field-eyebrow">
+            CLASSIFIED ENCOUNTER // DISPLACEMENT
+          </div>
+
+          <h2>
+            {view.displacement.phase === "resolved"
+              ? "THE ANOMALY HAS BEEN RESOLVED"
+              : view.displacement.role === "actor"
+                ? "ALTER THE EVIDENCE"
+                : view.displacement.role === "investigator"
+                  ? "INVESTIGATE THE ANOMALY"
+                  : "AN ENVIRONMENTAL ANOMALY"}
+          </h2>
+
+          <p>{view.displacement.instruction}</p>
+
+          {view.displacement.role === "actor" &&
+            view.displacement.phase === "awaiting_action" && (
+              <>
+                <label htmlFor="displacement-action">
+                  PHYSICAL ACTION
+                </label>
+
+                <select
+                  id="displacement-action"
+                  value={displacementAction}
+                  disabled={busy}
+                  onChange={e =>
+                    setDisplacementAction(
+                      e.target.value as "move" | "rotate" | "reposition",
+                    )
+                  }
+                >
+                  <option value="reposition">Reposition safely</option>
+                  <option value="rotate">Rotate safely</option>
+                  <option value="move">Move safely</option>
+                </select>
+              </>
+            )}
+
+          {view.displacement.role === "investigator" &&
+            view.displacement.phase === "awaiting_investigation" && (
+              <>
+                <label htmlFor="displacement-object">
+                  WHICH OBJECT CHANGED?
+                </label>
+
+                <select
+                  id="displacement-object"
+                  value={displacementObjectId}
+                  disabled={busy}
+                  onChange={e => setDisplacementObjectId(e.target.value)}
+                >
+                  <option value="">SELECT A SUSPECTED OBJECT</option>
+
+                  {view.objects.map(object => (
+                    <option key={object.id} value={object.id}>
+                      {object.name} — {object.location}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+
+          {(
+            (view.displacement.role === "actor" &&
+              view.displacement.phase === "awaiting_action") ||
+            (view.displacement.role === "investigator" &&
+              view.displacement.phase === "awaiting_investigation")
+          ) && (
+            <>
+              <label htmlFor="displacement-observation">
+                DESCRIBE YOUR EVIDENCE
+              </label>
+
+              <textarea
+                id="displacement-observation"
+                rows={4}
+                maxLength={1200}
+                value={displacementObservation}
+                disabled={busy}
+                onChange={e => setDisplacementObservation(e.target.value)}
+                placeholder="Describe what you physically changed or independently observed."
+              />
+
+              <div className="field-displacement-camera">
+                <strong>PHOTOGRAPHIC EVIDENCE</strong>
+                <FieldEvidenceCamera
+                  key={`displacement-${view.displacement.phase}-${view.displacement.role}`}
+                  label="DISPLACEMENT EVIDENCE"
+                  disabled={busy}
+                  onCapture={setDisplacementCaptured}
+                />
+              </div>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  !displacementObjectId ||
+                  !displacementCaptured ||
+                  displacementObservation.trim().length < 12
+                }
+                onClick={() => void submitDisplacement()}
+              >
+                {busy ? "TRANSMITTING..." : "SUBMIT DISPLACEMENT EVIDENCE"}
+              </button>
+            </>
+          )}
+
+          {view.displacement.phase === "awaiting_action" &&
+            view.displacement.role !== "actor" && (
+              <p role="status">
+                AWAITING ENVIRONMENTAL CHANGE...
+              </p>
+            )}
+
+          {view.displacement.phase === "awaiting_investigation" &&
+            view.displacement.role !== "investigator" && (
+              <p role="status">
+                INVESTIGATION IN PROGRESS...
+              </p>
+            )}
+
+          {view.displacement.phase === "resolved" && (
+            <p role="status">
+              RESULT // {view.displacement.outcome?.toUpperCase() ?? "RECORDED"}
+            </p>
+          )}
+        </section>
+      )}
       {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
         <div className="field-puzzle field-accusation">
           <blockquote className="field-transmission" aria-label="Architect evidence challenge">
@@ -305,6 +534,9 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
       </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal", "exchange"].includes(view.stage) ? (
+        view.stage === "exchange" && view.displacement && view.displacement.phase !== "resolved"
+          ? <p className="field-prompt" role="status">Complete the Displacement encounter before continuing the shared investigation.</p>
+          : 
         view.submitted
           ? <div className="field-controls" role="status">
               <strong>EVIDENCE RECEIVED</strong>
@@ -326,14 +558,12 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <textarea id="field-observation" rows={5} maxLength={1200} value={observation} onChange={e => setObservation(e.target.value)} placeholder="What did you actually observe or do? What changed, or what did you discover?" />
           <label htmlFor="field-detail">CLOSE-UP DETAIL (YEAR, MODEL, MARKING, OR OTHER LEGIBLE FACT)</label>
           <input id="field-detail" value={detail} maxLength={240} onChange={e => setDetail(e.target.value)} placeholder="Only enter a detail you can read or verify." />
-          {cameraActive || capturedUrl ? <div className="scanner-viewport field-camera-viewport">
-            {!capturedUrl && <video ref={videoRef} className="scanner-live-video" autoPlay playsInline muted aria-label="Live close-up camera view" />}
-            {capturedUrl && <img className="scanner-captured-image" src={capturedUrl} alt="Captured close-up evidence" />}
-            <div className="scanner-camera-tint" aria-hidden="true" /><div className="scanner-camera-scanlines" aria-hidden="true" />
-            <header className="scanner-hud-header"><div><span className="scanner-hud-brand">THRESHOLD // LENS</span><span className="scanner-hud-subtitle">CLOSE-UP // EVIDENCE CAPTURE</span></div><span className="scanner-camera-status"><span className="indicator-dot" />{capturedUrl ? "IMAGE CAPTURED" : "OPTICS ACTIVE"}</span></header>
-            {!capturedUrl && <div className="scanner-hud-reticle" aria-hidden="true"><span className="scanner-crosshair">+</span></div>}
-            <div className="scanner-hud-bottom"><div className="scanner-hud-message"><span className="scanner-hud-label">[ ARCHITECT TRANSMISSION ]</span><p>{capturedUrl ? "Review the close-up. Retake if the detail is unreadable." : "Frame the confirmed object detail. Do not handle unsafe objects."}</p></div><div className="scanner-hud-actions">{capturedUrl ? <button type="button" className="scanner-hud-secondary" onClick={retake}>RETAKE</button> : <button type="button" className="scanner-hud-primary" onClick={capture}>CAPTURE EVIDENCE</button>}<button type="button" className="scanner-hud-secondary" onClick={() => { setCameraActive(false); setCaptured(null); setCapturedUrl(null); }}>CANCEL</button></div></div>
-          </div> : <button type="button" onClick={() => setCameraActive(true)}>OPEN ARCHITECT CAMERA</button>}
+          <FieldEvidenceCamera
+            key={`observation-${view.stage}-${view.target?.id ?? "none"}`}
+            label="CLOSE-UP EVIDENCE"
+            disabled={busy}
+            onCapture={setCaptured}
+          />
           <button disabled={busy || observation.trim().length < 12 || !view.objects.length || (["examine", "move", "rotate", "reposition"].includes(action) && !captured)} onClick={() => void submit()}>{busy ? "TRANSMITTING..." : "SUBMIT VERIFIED REPORT"}</button>
           <small>Photos support the report. The Architect accepts only legible, grounded evidence and may ask you to retry.</small>
         </>}

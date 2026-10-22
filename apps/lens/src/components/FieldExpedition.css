@@ -469,6 +469,33 @@
   white-space: normal;
 }
 
+.field-displacement {
+  margin-block: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(190, 157, 101, 0.65);
+  border-radius: 12px;
+  background:
+    linear-gradient(
+      145deg,
+      rgba(190, 157, 101, 0.12),
+      rgba(12, 18, 22, 0.45)
+    );
+}
+
+.field-displacement h2 {
+  margin: 0.75rem 0;
+  letter-spacing: 0.09em;
+}
+
+.field-displacement textarea,
+.field-displacement select {
+  width: 100%;
+}
+
+.field-displacement [role="status"] {
+  letter-spacing: 0.07em;
+}
+
 @media (max-width: 480px) {
   .field-accusation {
     padding: 18px 12px;
