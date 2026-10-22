@@ -1,7 +1,7 @@
 # Amazon Developer Experience Log
 
-**Project:** Threshold  
-**Platform:** Amazon Fire TV / Fire OS  
+**Project:** Threshold
+**Platform:** Amazon Fire TV / Fire OS
 **Purpose:** Developer experience documentation and actionable platform feedback
 
 ## Overview
@@ -16,12 +16,16 @@ Experiences are classified as **positive**, **mixed**, or **negative**. General 
 
 ## Experience Summary
 
+
 | ID | Experience | Classification |
 |---|---|---|
 | AF-001 | [Physical Fire TV Development Setup](#af-001--physical-fire-tv-development-setup) | Positive |
 | AF-002 | [Reusing a Fire TV Remote Across Multiple Devices](#af-002--reusing-a-fire-tv-remote-across-multiple-devices) | Mixed |
 | AF-003 | [Fire OS 6 Compatibility and Physical Device Testing](#af-003--fire-os-6-compatibility-and-physical-device-testing) | Positive |
 | AF-004 | [Bedrock Account Verification and Zero Inference Quotas](#af-004--bedrock-account-verification-and-zero-inference-quotas) | Negative |
+| AF-005 | [AWS Infrastructure Setup and Cross-Device Backend Deployment](#af-005--aws-infrastructure-setup-and-cross-device-backend-deployment) | Positive |
+| AF-006 | [CloudWatch Operational Logging and Failure Monitoring](#af-006--cloudwatch-operational-logging-and-failure-monitoring) | Positive |
+
 
 ---
 
@@ -45,13 +49,13 @@ If account activation, verification, or service quotas prevented inference, thos
 
 On October 9, 2026, AWS CLI authentication succeeded using an IAM Identity Center administrator permission set. Amazon Bedrock successfully returned model information confirming that `amazon.nova-micro-v1:0` was active and supported on-demand inference in `us-east-1`.
 
-At approximately 4:00 MDT, an initial Converse API request returned an `AccessDeniedException` indicating that the AWS account was undergoing verification, which the error suggested would normally take less than two hours. More than siz hours later, another request returned `ThrottlingException: Too many tokens per day, please wait before trying again.` No successful inference has occurred.
+At approximately 4:00 MDT, an initial Converse API request returned an `AccessDeniedException` indicating that the AWS account was undergoing verification, which the error suggested would normally take less than two hours. More than six hours later, another request returned `ThrottlingException: Too many tokens per day, please wait before trying again.` No successful inference has occurred.
 
 AWS Service Quotas showed applied values of zero for Nova Micro on-demand requests per minute, tokens per minute, daily invocation tokens, and cross-region inference quotas. The AWS Account console showed no apparent activation requirement; its Customer Verification page stated that customer verification was not required at that time. AWS User Notifications verification messages discovered in Gmail's Spam folder concerned delivery channels, not Bedrock inference access.
 
-A support case was submitted on October 9 at 10:26 AM MDT. AWS Support responded on October 14 at 12:32 PM MDT, approximately 5 days and 2 hours later. The support engineer apologized for the delay and reported consulting the Bedrock team. The team recommended increasing usage of existing AWS services to support a future quote increase, contacting AWS Sales for an account-manager evaluation, potentially using Free Tier services to establish activity, or waiting until a subsequent billing cycle. The response did not identify the specific reason for zero Bedrock inference quotes or enable initial inference access.
+A support case was submitted on October 9 at 10:26 AM MDT. AWS Support responded on October 14 at 12:32 PM MDT, approximately 5 days and 2 hours later. The support engineer apologized for the delay and reported consulting the Bedrock team. The team recommended increasing usage of existing AWS services to support a future quota increase, contacting AWS Sales for an account-manager evaluation, potentially using Free Tier services to establish activity, or waiting until a subsequent billing cycle. The response did not identify the specific reason for zero Bedrock inference quotas or enable initial inference access.
 
-On October 21, further Service Quota checks in `us-east-1` showed zero applied daily inference-token allowances for numerous models, including Amazon Nova Lite, Nova Pro, Nova 2 Lite, and multiple Anthropic Claude models, despite higher displayed AWS default quotas. A separate cross-model quote was nonzero, but that did not resolve the model-specific zero allowances. A direct Converse API invocation using `amazon.nova-lite-v1:0` again returned `ThrottlingException: Too many tokens per day, please wait before trying again.` Model discovery continued to work, but invocation remained blocked for the tested models. 
+On October 21, further Service Quota checks in `us-east-1` showed zero applied daily inference-token allowances for numerous models, including Amazon Nova Lite, Nova Pro, Nova 2 Lite, and multiple Anthropic Claude models, despite higher displayed AWS default quotas. A separate cross-model quota was nonzero, but that did not resolve the model-specific zero allowances. A direct Converse API invocation using `amazon.nova-lite-v1:0` again returned `ThrottlingException: Too many tokens per day, please wait before trying again.` Model discovery continued to work, but invocation remained blocked for the tested models.
 
 The existing support case was reopened by the developer (me) on October 21 at 12:17 PM MDT, requesting urgent escalation, an explanation of the zero quota, and consideration of minimal nonzero inference access for the October 23 hackathon deadline. As of this update, no successful Bedrock inference request has been confirmed.
 
@@ -77,7 +81,11 @@ The restriction prevented the first successful Amazon Bedrock inference request 
 
 Investigation, account checks, and support correspondence consumed development time across October 9–21. The issue remained unresolved twelve days after the original support request, with the October 23, 2026, 1:00 PM Mountain Time hackathon deadline approaching.
 
-Local development could continue using mock responses or an alternative local AI provider, but those paths could not validate the actual Bedrock integration. The inability to perform even minimal inference introduced significant schedule risk to the AWS-powered demonstration.
+To avoid blocking the hackathon demonstration, the application retained its provider abstraction and integrated Google Gemini as an alternative inference provider. AWS continued to host the session backend, store calibration images, and manage cloud credentials.
+
+On October 21, the alternative implementation successfully analyzed a photograph captured through the mobile Lens and returned recognizable objects for player confirmation. This restored the intended cloud AI calibration workflow without resolving the underlying Bedrock access restriction.
+
+The workaround demonstrated the value of provider-independent application architecture, but it did not eliminate the developer experience concern: the Bedrock account could discover supported models while remaining unable to perform an initial inference request.
 
 **What Worked Well**
 
@@ -97,7 +105,7 @@ Local development could continue using mock responses or an alternative local AI
 - The Customer Verification page said verification was not required, without clarifying the initial verification error.
 - The automated support workflow did not identify a resolution.
 - The first human support response took approximately five days and did not resolve the restriction.
-- Recommendations to demonstrate high service utilization were difficult to apply to Bedrock inference with an existing allowance of zero. 
+- Recommendations to demonstrate high service utilization were difficult to apply to Bedrock inference with an existing allowance of zero.
 - Suggested Sales engagement or waiting for another billing cycle did not offer a reliable path within the hackathon timeline.
 - The exact cause of the zero quotas, including whether it relates to verification or account eligibility, remained unconfirmed.
 
@@ -289,6 +297,140 @@ Successful compilation, lint validation, APK installation, and application launc
 No significant Fire OS-specific improvement identified during this compatibility milestone.
 
 Testing on older physical hardware early in development remains a useful practice for identifying SDK and resource compatibility requirements.
+
+---
+
+### AF-005 — AWS Infrastructure Setup and Cross-Device Backend Deployment
+
+**Task**
+
+Deploy Threshold's multiplayer session backend to AWS, configure persistent calibration-image storage, secure access to cloud resources, and establish HTTPS communication between physical Fire TV devices and mobile Lens clients.
+
+**Experience:** Positive
+
+**Expected Behavior**
+
+Deploying a custom Node.js application to AWS could require coordination across compute, networking, storage, permissions, remote administration, and application configuration. The goal was to establish a functional cloud backend without introducing unnecessary infrastructure complexity.
+
+**Observed Behavior**
+
+The AWS deployment process was generally straightforward. Amazon EC2 provided a suitable environment for the existing Next.js session service, and AWS Systems Manager enabled remote administration without requiring direct SSH access.
+
+Amazon S3 successfully supported private storage and retrieval of calibration photographs. The IAM instance role allows the EC2 instance to access the required AWS resources without embedding AWS credentials in application code.
+
+AWS Systems Manager Parameter Store also provided encrypted storage for the external AI provider's API key.
+
+After configuring HTTPS through Caddy, physical Fire TV device and mobile Lens client successfully communicated with the deployed backend.
+
+The application completed a real-world calibration workflow: a photograph captured on a phone was uploaded, analyzed using the configured AI provider, presented for object confirmation, and followed by progression into the investigation.
+
+**Steps Performed**
+
+1. Configured AWS CLI authentication and verified account access.
+2. Provisioned an Amazon Linux EC2 instance.
+3. Installed and configured the Node.js session backend as a systemd service.
+4. Configured an EC2 IAM role with permissions for required AWS resources.
+5. Created an S3 bucket for private calibration-image storage.
+6. Verified image upload, retrieval, and deletion operations.
+7. Configured AWS Systems Manager for remote command execution.
+8. Established HTTPS access through Caddy and a public hostname.
+9. Stored an external AI provider's API key in Systems Manager Parameter Store as a SecureString.
+10. Granted the EC2 role permission to retrieve the specific parameter.
+11. Deployed the updated backend and verified the public health endpoint.
+12. Successfully tested the complete phone-to-cloud calibration workflow.
+
+**Development Impact**
+
+AWS enabled Threshold to move from local development to a functioning cloud-hosted multiplayer experience.
+
+The existing session service required relatively limited architectural changes to operate on EC2. AWS services supported persistent storage, credential management, and remote administration while allowing the application to retain its existing technology stack.
+
+This made it possible to focus development effort on gameplay rather than extensive infrastructure troubleshooting.
+
+**What Worked Well**
+
+- EC2 supported the existing Node.js application without requiring a rewrite.
+- Systems Manager provided convenient remote administration and deployment.
+- S3 integration worked reliably for calibration-image operations.
+- IAM instance-role permissions avoided storing AWS credentials in the application.
+- Parameter Store provided a straightforward way to manage an encrypted API credential.
+- AWS CLI commands made infrastructure configuration and verification repeatable.
+- The deployed backend successfully supported communication between multiple physical devices.
+- Existing local development workflows could be preserved alongside cloud deployment.
+
+**Minor Challenges and Lessons Learned**
+
+An initial backend deployment health check ran immediately after restarting the systemd service. The application has not yet started listening, causing the deployment script to initiate a rollback.
+
+The rollback succeeded. After adding a startup polling interval, the same application build deployed successfully.
+
+This was an application deployment-script timing issue rather than a demonstrated defect in an AWS service.
+
+**Suggested Improvement**
+
+No significant AWS-specific improvement was identified during the deployment.
+
+The experience demonstrated that value of clear service documentation, scoped IAM permissions, and Systems Manager-based administration for small application deployments.
+
+**Resolution Status**
+
+Successful — the AWS-hosted backend was operational on October 21, 2026, and the end-to-end calibration workflow was validated on physical devices.
+
+---
+
+### AF-006 — CloudWatch Operational Logging and Failure Monitoring
+
+**Task**
+
+Establish lightweight operational observability for the Threshold session backend while minimizing the collection of sensitive gameplay data and controlling monitoring costs.
+
+**Experience:** Positive
+
+**Expected Behavior**
+
+The backend should emit structured operational events that support troubleshooting without recording raw calibration photographs, private player messages, credentials, or unrestricted AI responses. Operational failures should be observable through AWS monitoring tools.
+
+**Observed Behavior**
+
+A structured operational logging module was introduced to emit an allowlisted set of event fields, including timestamps, severity, event names, durations, object counts, status codes, and approved error codes. Unexpected event names are rejected by automated tests.
+
+The application writes operational events to a dedicated JSON Lines file, with the CloudWatch agent configured to forward this file to the `/threshold/session` log group.
+
+The log group was configured with seven-day retention. The CloudWatch agent was installed and activated on the EC2 instance, and a test event was successfully observed in CloudWatch Logs.
+
+A metric filter was configured to identify `calibration.analysis.failed` events and publish a `CalibrationFailures` metric in the `Threshold` namespace. The `ThresholdCalibrationFailureAlarm` alarm was created with a threshold of one failure.
+
+**Troubleshooting and Validation**
+
+1. Created a dedicated operational log directory and file with restricted filesystem permissions.
+2. Configured log rotation to limit local disk usage.
+3. Implemented an allowlisted operational logger and automated tests.
+4. Deployed the updated application build and verified the backend health endpoint.
+5. Installed and configured the CloudWatch agent.
+6. Confirmed that a test operational event reached the expected CloudWatch log stream.
+7. Created and verified the calibration failure metric filter and alarm.
+
+**Development Impact**
+
+This work established a foundation for diagnosing backend and calibration failures without relying exclusively on manual inspection of system logs. Local log rotation and CloudWatch retention settings also help limit unnecessary storage accumulation.
+
+**What Worked Well**
+
+- Structured operational events provide a consistent troubleshooting format.
+- Automated tests verify the approved logging contract.
+- CloudWatch Logs centralizes operational events from the EC2 instance.
+- Seven-day retention and local log rotation establish explicit storage limits.
+- Metric filters and alarms provide a path toward automated failure detection.
+
+**Limitations**
+
+The alarm's existence and configuration were verified, but successful alarm triggering and notification delivery have not been demonstrated. No notification destination has been configured.
+
+The test event verified log ingestion, but it did not independently demonstrate that every application event is emitted and delivered successfully.
+
+**Resolution Status**
+
+Initial logging and monitoring configuration completed on October 21, 2026. Further validation of real failure detection remains optional follow-up work.
 
 ---
 
