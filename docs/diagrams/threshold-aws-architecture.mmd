@@ -1,0 +1,36 @@
+flowchart TB
+    subgraph CLIENTS["PLAYER DEVICES"]
+      TV["Fire TV Thresholds"]
+      LENS["Mobile Lens web app"]
+    end
+    DNS["DuckDNS hostname<br/>threshold-game.duckdns.org"]
+    subgraph AWS["AWS DEPLOYMENT — REPORTED CONFIGURATION"]
+      subgraph EC2["Amazon EC2 — Amazon Linux 2023"]
+        CADDY["Caddy<br/>HTTPS reverse proxy"]
+        API["Node.js / Express<br/>Session and game service"]
+        DB[("SQLite<br/>Server persistence")]
+        CADDY --> API
+        API <--> DB
+      end
+      S3[("Amazon S3<br/>Private calibration images<br/>1-day lifecycle reported")]
+      PARAM["Systems Manager<br/>Parameter Store"]
+      IAM["IAM<br/>Instance/service permissions"]
+      CW["CloudWatch<br/>Logs and alarm"]
+      API <--> S3
+      PARAM -.->|"Application configuration"| API
+      IAM -.->|"Controls AWS access"| API
+      API -.->|"Operational logs"| CW
+    end
+    GEMINI["Google Gemini API<br/>Cloud AI provider"]
+    TV -->|"HTTPS requests / polling"| DNS
+    LENS -->|"HTTPS requests / uploads"| DNS
+    DNS --> CADDY
+    API <-->|"AI and image analysis"| GEMINI
+    NOTE["Lens frontend is not hosted by this backend diagram"]
+    NOTE -.-> LENS
+    classDef device fill:#dcecff,stroke:#2876c7,color:#153653
+    classDef infra fill:#fff0d4,stroke:#d39a32,color:#553b12
+    classDef external fill:#f0e0ff,stroke:#9251c5,color:#40205e
+    class TV,LENS device
+    class CADDY,API,DB,S3,PARAM,IAM,CW infra
+    class GEMINI external

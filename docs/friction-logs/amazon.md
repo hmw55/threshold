@@ -1,8 +1,11 @@
 # Amazon Developer Experience Log
 
 **Project:** Threshold
-**Platform:** Amazon Fire TV / Fire OS
+
+**Platform:** Amazon Fire TV / Fire OS / AWS
+
 **Purpose:** Developer experience documentation and actionable platform feedback
+**Last reviewed:** October 22, 2026
 
 ## Overview
 
@@ -10,22 +13,27 @@ This log documents experiences involving Amazon technologies encountered during 
 
 Entries cover Fire TV hardware, Fire OS compatibility, application deployment, Amazon development tooling, and related services.
 
-The objective is to provide constructive, evidence-based feedback by documenting expected behavior, observed outcomes, development impact, and opportunities for improvement.
+The objective is to provide constructive, evidence-based feedback by documenting expected behavior, observed outcomes, development impact, and opportunities for improvement. Entries describe specific tested configurations and dates, not universal service behavior.
 
 Experiences are classified as **positive**, **mixed**, or **negative**. General development challenges unrelated to Amazon technologies are documented separately in [Developer Friction](./developer.md).
 
 ## Experience Summary
 
-
 | ID | Experience | Classification |
-|---|---|---|
-| AF-001 | [Physical Fire TV Development Setup](#af-001--physical-fire-tv-development-setup) | Positive |
-| AF-002 | [Reusing a Fire TV Remote Across Multiple Devices](#af-002--reusing-a-fire-tv-remote-across-multiple-devices) | Mixed |
-| AF-003 | [Fire OS 6 Compatibility and Physical Device Testing](#af-003--fire-os-6-compatibility-and-physical-device-testing) | Positive |
-| AF-004 | [Bedrock Account Verification and Zero Inference Quotas](#af-004--bedrock-account-verification-and-zero-inference-quotas) | Negative |
-| AF-005 | [AWS Infrastructure Setup and Cross-Device Backend Deployment](#af-005--aws-infrastructure-setup-and-cross-device-backend-deployment) | Positive |
-| AF-006 | [CloudWatch Operational Logging and Failure Monitoring](#af-006--cloudwatch-operational-logging-and-failure-monitoring) | Positive |
 
+|---|---|---|
+
+| AF-001 | [Physical Fire TV Development Setup](#af-001--physical-fire-tv-development-setup) | Positive |
+
+| AF-002 | [Reusing a Fire TV Remote Across Multiple Devices](#af-002--reusing-a-fire-tv-remote-across-multiple-devices) | Mixed |
+
+| AF-003 | [Fire OS 6 Compatibility and Physical Device Testing](#af-003--fire-os-6-compatibility-and-physical-device-testing) | Positive |
+
+| AF-004 | [Bedrock Account Verification and Zero Inference Quotas](#af-004--bedrock-account-verification-and-zero-inference-quotas) | Negative |
+
+| AF-005 | [AWS Infrastructure Setup and Cross-Device Backend Deployment](#af-005--aws-infrastructure-setup-and-cross-device-backend-deployment) | Positive |
+
+| AF-006 | [CloudWatch Operational Logging and Failure Monitoring](#af-006--cloudwatch-operational-logging-and-failure-monitoring) | Positive |
 
 ---
 
@@ -53,7 +61,7 @@ At approximately 4:00 MDT, an initial Converse API request returned an `AccessDe
 
 AWS Service Quotas showed applied values of zero for Nova Micro on-demand requests per minute, tokens per minute, daily invocation tokens, and cross-region inference quotas. The AWS Account console showed no apparent activation requirement; its Customer Verification page stated that customer verification was not required at that time. AWS User Notifications verification messages discovered in Gmail's Spam folder concerned delivery channels, not Bedrock inference access.
 
-A support case was submitted on October 9 at 10:26 AM MDT. AWS Support responded on October 14 at 12:32 PM MDT, approximately 5 days and 2 hours later. The support engineer apologized for the delay and reported consulting the Bedrock team. The team recommended increasing usage of existing AWS services to support a future quota increase, contacting AWS Sales for an account-manager evaluation, potentially using Free Tier services to establish activity, or waiting until a subsequent billing cycle. The response did not identify the specific reason for zero Bedrock inference quotas or enable initial inference access.
+An AWS Support case was submitted on October 9 at 10:26 AM MDT. AWS Support responded on October 14 at 12:32 PM MDT, approximately 5 days and 2 hours later. The support engineer apologized for the delay and reported consulting the Bedrock team. The team recommended increasing usage of existing AWS services to support a future quota increase, contacting AWS Sales for an account-manager evaluation, potentially using Free Tier services to establish activity, or waiting until a subsequent billing cycle. The response did not identify the specific reason for zero Bedrock inference quotas or enable initial inference access.
 
 On October 21, further Service Quota checks in `us-east-1` showed zero applied daily inference-token allowances for numerous models, including Amazon Nova Lite, Nova Pro, Nova 2 Lite, and multiple Anthropic Claude models, despite higher displayed AWS default quotas. A separate cross-model quota was nonzero, but that did not resolve the model-specific zero allowances. A direct Converse API invocation using `amazon.nova-lite-v1:0` again returned `ThrottlingException: Too many tokens per day, please wait before trying again.` Model discovery continued to work, but invocation remained blocked for the tested models.
 
@@ -62,17 +70,29 @@ The existing support case was reopened by the developer (me) on October 21 at 12
 **Troubleshooting Steps**
 
 1. Configured IAM Identity Center with an `AdministratorAccess` permission set, installed AWS CLI v2, and authenticated using an SSO profile.
+
 2. Verified AWS identity using `aws sts get-caller-identity` and listed available Bedrock foundation models.
+
 3. Confirmed Nova Micro's active status and reported on-demand inference support.
+
 4. Attempted a Converse API request and received an account-verification error.
+
 5. Retried more than six hours later and received a daily-token throttling error.
+
 6. Inspected AWS Service Quotas and found zero effective inference allowances for Nova Micro.
+
 7. Checked AWS Account activation and Customer Verification status, and reviewed unrelated AWS User Notifications verification emails.
+
 8. Used the AWS Support automated assistant, which did not identify an actionable resolution.
-9. Created AWS Support case `179156319400779` on October 9 under Account Management / Account Verification.
+
+9. Created an AWS Support case on October 9 under Account Management / Account Verification.
+
 10. Reviewed the October 14 AWS Support reply, including the Bedrock team's usage, Sales, and billing-cycle recommendations.
+
 11. Rechecked model-specific daily quotas for multiple models in `us-east-1` on October 21.
+
 12. Attempted direct inference with Nova Lite and reproduced the daily-token throttling error.
+
 13. Reopened the support case on October 21 with the latest evidence and requested an expedited review before the hackathon deadline.
 
 **Development Impact**
@@ -90,23 +110,37 @@ The workaround demonstrated the value of provider-independent application archit
 **What Worked Well**
 
 - IAM Identity Center authentication and AWS CLI integration worked successfully.
+
 - Amazon Bedrock model discovery returned useful metadata, allowing model availability to be distinguished from inference eligibility.
+
 - AWS Service Quotas exposed applied values and made the zero inference allowances independently observable.
+
 - The initial error identified account verification as a possible restriction.
+
 - Basic Support allowed an account-related case to be opened without upgrading to a paid support plan.
+
 - AWS Support responded, consulted its Bedrock team, and preserved the case correspondence.
+
 - The Support Center permitted the original case to be reopened with additional evidence.
 
 **Areas of Friction**
 
 - Successful authentication and model discovery did not mean that the account could invoke models, but that distinction was not clear during onboarding.
+
 - The first error suggested verification would normally take less than two hours; subsequent requests instead reported daily token exhaustion despite no successful inference.
+
 - Model-specific applied quotas were zero, while displayed default quota values were much higher; the console did not explain the account-specific restriction or a direct path to initial access.
+
 - The Customer Verification page said verification was not required, without clarifying the initial verification error.
+
 - The automated support workflow did not identify a resolution.
+
 - The first human support response took approximately five days and did not resolve the restriction.
+
 - Recommendations to demonstrate high service utilization were difficult to apply to Bedrock inference with an existing allowance of zero.
+
 - Suggested Sales engagement or waiting for another billing cycle did not offer a reliable path within the hackathon timeline.
+
 - The exact cause of the zero quotas, including whether it relates to verification or account eligibility, remained unconfirmed.
 
 **Suggested Improvement**
@@ -119,15 +153,17 @@ For new accounts and time-limited developer programs, provide a clear escalation
 
 **Resolution Status**
 
-Unresolved — support case reopened October 21, 2026; awaiting further response.
+Unresolved as of October 21, 2026 — support case reopened; further response not documented here.
 
-- October 9, 2026, 10:26 AM MDT: Case 179156319400779 opened.
+- October 9, 2026, 10:26 AM MDT: Support case opened.
+
 - October 14, 2026, 12:32 PM MDT: AWS Support responded after approximately five days and relayed Bedrock team recommendations.
+
 - October 21, 2026: Additional zero model-specific quotas observed; Nova Lite inference failed with a daily-token throttling error.
+
 - October 21, 2026, 12:17 PM MDT: Case reopened requesting urgent escalation.
 
-No successful Amazon Bedrock inference request has been confirmed. The cause of the zero quotas and their relationship, if any, to account verification remain unconfirmed.
-
+No successful Amazon Bedrock inference request had been confirmed as of the October 21 check. The cause of the zero quotas and their relationship, if any, to account verification remained unconfirmed. Any later support response or change in access should be recorded as a dated follow-up rather than retroactively changing the original observation.
 
 ---
 
@@ -158,13 +194,21 @@ The Amazon Fire TV mobile application provided an important recovery mechanism b
 **Troubleshooting Steps**
 
 1. Attempted to connect the existing remote to the second Fire TV Stick.
+
 2. With the original television and Fire TV Stick powered off, held Left + Menu + Back for approximately 12 seconds to reset the remote connection.
+
 3. Removed the remote batteries for more than five seconds before reinstalling them.
+
 4. Held Home for approximately 30 seconds to initiate pairing.
+
 5. Repeated the pairing sequence approximately two or three times before successfully connecting the remote to the second Fire TV Stick.
+
 6. Connected the second Fire TV Stick to the Amazon Fire TV mobile application to enable its virtual remote functionality.
+
 7. Disconnected power from the second Fire TV Stick.
+
 8. Attempted to restore the physical remote's connection to the original Fire TV Stick, requiring additional attempts.
+
 9. Used the mobile application, which was already paired with the original device, to access remote-management settings and initiate pairing.
 
 **Development Impact**
@@ -176,14 +220,19 @@ Although the issue was resolved without permanent loss of functionality, restori
 **What Worked Well**
 
 - The physical remote could ultimately be paired with both Fire TV devices.
+
 - The Fire TV mobile application provided an effective alternative input method.
+
 - Existing mobile-app connectivity allowed access to pairing settings when the physical remote was unavailable.
 
 **Areas of Friction**
 
 - Multiple pairing attempts were required.
+
 - Pairing failures provided limited diagnostic feedback.
+
 - Returning the remote to its original device was unexpectedly difficult.
+
 - Recovery was substantially easier because the mobile application had already been configured.
 
 **Suggested Improvement**
@@ -193,8 +242,11 @@ Improve the discoverability and clarity of remote-pairing and recovery workflows
 Potential improvements include:
 
 - Clearer visual feedback when a remote enters pairing mode.
+
 - More informative guidance when pairing attempts are unsuccessful.
+
 - Easier access to remote recovery instructions.
+
 - More explicit guidance for situations where no physical remote is currently connected.
 
 These observations reflect the specific devices and remote used during testing and may not apply uniformly to all Fire TV models.
@@ -224,10 +276,15 @@ The locally compiled Android APK was installed and launched successfully without
 **Steps Performed**
 
 1. Enabled Developer Options in the Fire TV settings.
+
 2. Enabled ADB debugging.
+
 3. Identified the Fire TV Stick on the local network.
+
 4. Established an ADB connection to the device.
+
 5. Installed the Threshold debug APK.
+
 6. Launched Threshold directly on the physical Fire TV.
 
 **Development Impact**
@@ -237,8 +294,11 @@ The accessible deployment workflow enabled physical-device validation early in d
 **What Worked Well**
 
 - Straightforward access to developer settings.
+
 - Direct ADB connectivity over the local network.
+
 - Support for sideloading locally compiled APKs.
+
 - No requirement to publish the application before testing on physical hardware.
 
 **Suggested Improvement**
@@ -270,11 +330,17 @@ The resulting APK installed and launched successfully on the older Fire TV Stick
 **Steps Performed**
 
 1. Identified the application's existing minimum SDK requirement of API 28.
+
 2. Updated the minimum supported SDK version to API 25.
+
 3. Added the missing television launcher banner resource.
+
 4. Removed a navigation-bar style attribute requiring API 27.
+
 5. Successfully completed the Android build and lint checks.
+
 6. Connected the Fire OS 6 device through ADB.
+
 7. Installed the debug APK and launched Threshold on the physical device.
 
 **Development Impact**
@@ -284,8 +350,11 @@ The compatibility changes expanded Threshold's physical-device testing coverage 
 **What Worked Well**
 
 - A single native Android/Kotlin codebase could target both tested Fire TV devices.
+
 - Required compatibility adjustments were relatively limited.
+
 - Existing Gradle and ADB workflows remained usable across devices.
+
 - Older hardware could be incorporated into the development environment without maintaining a separate application.
 
 **Validation Scope**
@@ -314,34 +383,45 @@ Deploying a custom Node.js application to AWS could require coordination across 
 
 **Observed Behavior**
 
-The AWS deployment process was generally straightforward. Amazon EC2 provided a suitable environment for the existing Next.js session service, and AWS Systems Manager enabled remote administration without requiring direct SSH access.
+The AWS deployment process was generally straightforward in the tested configuration. Amazon EC2 provided a suitable environment for the existing Node.js/Express session service, and AWS Systems Manager enabled remote administration without requiring direct SSH access.
 
 Amazon S3 successfully supported private storage and retrieval of calibration photographs. The IAM instance role allows the EC2 instance to access the required AWS resources without embedding AWS credentials in application code.
 
 AWS Systems Manager Parameter Store also provided encrypted storage for the external AI provider's API key.
 
-After configuring HTTPS through Caddy, physical Fire TV device and mobile Lens client successfully communicated with the deployed backend.
+After configuring HTTPS through Caddy, physical Fire TV devices and a mobile Lens client successfully communicated with the deployed backend.
 
-The application completed a real-world calibration workflow: a photograph captured on a phone was uploaded, analyzed using the configured AI provider, presented for object confirmation, and followed by progression into the investigation.
+The tested configuration completed a real-world calibration workflow: a photograph captured on a phone was uploaded, analyzed using the configured AI provider, presented for object confirmation, and followed by progression into the investigation.
 
 **Steps Performed**
 
 1. Configured AWS CLI authentication and verified account access.
+
 2. Provisioned an Amazon Linux EC2 instance.
+
 3. Installed and configured the Node.js session backend as a systemd service.
+
 4. Configured an EC2 IAM role with permissions for required AWS resources.
+
 5. Created an S3 bucket for private calibration-image storage.
+
 6. Verified image upload, retrieval, and deletion operations.
+
 7. Configured AWS Systems Manager for remote command execution.
+
 8. Established HTTPS access through Caddy and a public hostname.
+
 9. Stored an external AI provider's API key in Systems Manager Parameter Store as a SecureString.
+
 10. Granted the EC2 role permission to retrieve the specific parameter.
+
 11. Deployed the updated backend and verified the public health endpoint.
+
 12. Successfully tested the complete phone-to-cloud calibration workflow.
 
 **Development Impact**
 
-AWS enabled Threshold to move from local development to a functioning cloud-hosted multiplayer experience.
+AWS enabled Threshold to move from a local-only backend to a cloud-hosted session service accessible by physical devices. A complete cloud-hosted multiplayer expedition across all supported configurations was not independently verified.
 
 The existing session service required relatively limited architectural changes to operate on EC2. AWS services supported persistent storage, credential management, and remote administration while allowing the application to retain its existing technology stack.
 
@@ -350,17 +430,24 @@ This made it possible to focus development effort on gameplay rather than extens
 **What Worked Well**
 
 - EC2 supported the existing Node.js application without requiring a rewrite.
+
 - Systems Manager provided convenient remote administration and deployment.
+
 - S3 integration worked reliably for calibration-image operations.
+
 - IAM instance-role permissions avoided storing AWS credentials in the application.
+
 - Parameter Store provided a straightforward way to manage an encrypted API credential.
+
 - AWS CLI commands made infrastructure configuration and verification repeatable.
+
 - The deployed backend successfully supported communication between multiple physical devices.
+
 - Existing local development workflows could be preserved alongside cloud deployment.
 
 **Minor Challenges and Lessons Learned**
 
-An initial backend deployment health check ran immediately after restarting the systemd service. The application has not yet started listening, causing the deployment script to initiate a rollback.
+An initial backend deployment health check ran immediately after restarting the systemd service. The application had not yet started listening, causing the deployment script to initiate a rollback.
 
 The rollback succeeded. After adding a startup polling interval, the same application build deployed successfully.
 
@@ -370,7 +457,7 @@ This was an application deployment-script timing issue rather than a demonstrate
 
 No significant AWS-specific improvement was identified during the deployment.
 
-The experience demonstrated that value of clear service documentation, scoped IAM permissions, and Systems Manager-based administration for small application deployments.
+The experience demonstrated the value of clear service documentation, scoped IAM permissions, and Systems Manager-based administration for small application deployments.
 
 **Resolution Status**
 
@@ -396,18 +483,24 @@ A structured operational logging module was introduced to emit an allowlisted se
 
 The application writes operational events to a dedicated JSON Lines file, with the CloudWatch agent configured to forward this file to the `/threshold/session` log group.
 
-The log group was configured with seven-day retention. The CloudWatch agent was installed and activated on the EC2 instance, and a test event was successfully observed in CloudWatch Logs.
+The log group was configured with seven-day retention. This operational log retention is separate from the lifecycle policy applied to calibration images in S3. The CloudWatch agent was installed and activated on the EC2 instance, and a test event was successfully observed in CloudWatch Logs.
 
 A metric filter was configured to identify `calibration.analysis.failed` events and publish a `CalibrationFailures` metric in the `Threshold` namespace. The `ThresholdCalibrationFailureAlarm` alarm was created with a threshold of one failure.
 
 **Troubleshooting and Validation**
 
 1. Created a dedicated operational log directory and file with restricted filesystem permissions.
+
 2. Configured log rotation to limit local disk usage.
+
 3. Implemented an allowlisted operational logger and automated tests.
+
 4. Deployed the updated application build and verified the backend health endpoint.
+
 5. Installed and configured the CloudWatch agent.
+
 6. Confirmed that a test operational event reached the expected CloudWatch log stream.
+
 7. Created and verified the calibration failure metric filter and alarm.
 
 **Development Impact**
@@ -417,9 +510,13 @@ This work established a foundation for diagnosing backend and calibration failur
 **What Worked Well**
 
 - Structured operational events provide a consistent troubleshooting format.
+
 - Automated tests verify the approved logging contract.
+
 - CloudWatch Logs centralizes operational events from the EC2 instance.
+
 - Seven-day retention and local log rotation establish explicit storage limits.
+
 - Metric filters and alarms provide a path toward automated failure detection.
 
 **Limitations**
@@ -434,10 +531,20 @@ Initial logging and monitoring configuration completed on October 21, 2026. Furt
 
 ---
 
+## Cross-cutting observations
+
+The strongest positive experience was the ability to deploy an existing Node.js/Express backend to EC2, administer it through Systems Manager, store calibration photographs privately in S3, and inspect structured operational events in CloudWatch without redesigning the game service.
+
+The most significant unresolved blocker was Bedrock inference access. The ability to authenticate, discover an active model, and view published default quotas did not guarantee a usable account-specific inference allowance. The application therefore used a provider abstraction and switched its tested cloud inference path to Gemini. This is a documented workaround, not evidence that Bedrock inference was successfully integrated.
+
+For reproducibility, AWS infrastructure setup, resource policies, and secret values should be described in dedicated deployment documentation without publishing account identifiers, support-case identifiers, private host configuration, or credentials. The public backend URL is not a publicly hosted Lens frontend.
+
 ## Documentation Notes
 
 This log records firsthand development observations rather than comprehensive product evaluations.
 
 Entries describe the specific tasks performed and outcomes observed. Suggested improvements represent developer feedback and are not assertions that a particular feature or capability is universally unavailable.
 
-Additional entries will be added when meaningful Amazon-related experiences arise during continued development and testing.
+**Verification boundary:** A successful APK install, a successful calibration request, and a CloudWatch test event validate different subsystems. None alone proves a complete multiplayer expedition on the deployed backend.
+
+Additional entries can be added when meaningful Amazon-related experiences arise during continued development and testing.

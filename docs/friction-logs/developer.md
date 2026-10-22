@@ -1,7 +1,7 @@
 # General Developer Friction Log
 
-**Project:** Threshold  
-**Scope:** Development tooling, frameworks, build systems, local infrastructure, and application integration  
+**Project:** Threshold
+**Scope:** Development tooling, frameworks, build systems, local infrastructure, and application integration
 **Purpose:** Document engineering challenges, resolutions, and lessons learned
 
 ## Overview
@@ -25,6 +25,9 @@ Issues directly related to Amazon products, Fire OS, Fire TV hardware, AWS servi
 | DF-005 | [Frontend and Backend Game Phase Synchronization](#df-005--frontend-and-backend-game-phase-synchronization) | Medium |
 | DF-006 | [Fire TV Remote Navigation and Completed Expedition Lifecycle](#df-006--fire-tv-remote-navigation-and-completed-expedition-lifecycle) | Medium |
 | DF-007 | [Cloudflare Tunnel Configuration and Environment Upload Reliability](#df-007--cloudflare-tunnel-configuration-and-environment-upload-reliability) | Medium |
+| DF-008 | [Solo Expedition Progression and Lens Interaction](#df-008--solo-expedition-progression-and-lens-interaction) | High |
+| DF-009 | [Cross-Device Expedition Coordination and Navigation](#df-009--cross-device-expedition-coordination-and-navigation) | Medium |
+| DF-010 | [AI Provider Migration and Environmental Grounding](#df-010--ai-provider-migration-and-environmental-grounding) | Medium |
 
 ---
 
@@ -32,8 +35,8 @@ Issues directly related to Amazon products, Fire OS, Fire TV hardware, AWS servi
 
 ### DF-001 — React Native Monorepo and Android Build Tooling
 
-**Area:** Framework integration / Android build tooling  
-**Severity:** Medium  
+**Area:** Framework integration / Android build tooling
+**Severity:** Medium
 **Status:** Resolved through architectural change
 
 **Task**
@@ -85,8 +88,8 @@ Although no application functionality was lost, the issues introduced unnecessar
 
 ### DF-002 — Cross-Device Development Networking
 
-**Area:** Local infrastructure / networking  
-**Severity:** Not assessed  
+**Area:** Local infrastructure / networking
+**Severity:** Not assessed
 **Status:** Resolved for the tested development environment
 
 **Task**
@@ -138,8 +141,8 @@ Once configured, the environment supported successful communication between the 
 
 ### DF-003 — Game State Persistence and Session Lifecycle
 
-**Area:** Backend architecture / state management  
-**Severity:** Medium  
+**Area:** Backend architecture / state management
+**Severity:** Medium
 **Status:** Implemented and validated through automated testing
 
 **Task**
@@ -198,8 +201,8 @@ Separating gameplay progression from individual client state increased implement
 
 ### DF-004 — Authentication Contract Consistency
 
-**Area:** API integration / authentication / automated testing  
-**Severity:** Low  
+**Area:** API integration / authentication / automated testing
+**Severity:** Low
 **Status:** Resolved
 
 **Task**
@@ -252,8 +255,8 @@ The issue was limited to development and testing; no confirmed production authen
 
 ### DF-005 — Frontend and Backend Game Phase Synchronization
 
-**Area:** Frontend integration / API state synchronization  
-**Severity:** Medium  
+**Area:** Frontend integration / API state synchronization
+**Severity:** Medium
 **Status:** Resolved for initial progression; subsequent full playthrough validated
 
 **Task**
@@ -322,8 +325,8 @@ The implementation also established a reusable approach for subsequent phase tra
 
 ### DF-006 — Fire TV Remote Navigation and Completed Expedition Lifecycle
 
-**Area:** Native Android / Fire TV input handling / session lifecycle  
-**Severity:** Medium  
+**Area:** Native Android / Fire TV input handling / session lifecycle
+**Severity:** Medium
 **Status:** Resolved and validated through physical-device testing
 
 **Task**
@@ -382,8 +385,8 @@ Resolving them allowed further end-to-end gameplay testing without requiring man
 
 ### DF-007 — Cloudflare Tunnel Configuration and Environment Upload Reliability
 
-**Area:** Local development infrastructure / HTTP connectivity / environment configuration  
-**Severity:** Medium  
+**Area:** Local development infrastructure / HTTP connectivity / environment configuration
+**Severity:** Medium
 **Status:** Working configuration restored; original upload failure cause unconfirmed
 
 **Task**
@@ -448,6 +451,136 @@ Maintaining two public development endpoints also introduced manual configuratio
 
 ---
 
+### DF-008 — Solo Expedition Progression and Lens Interaction
+
+**Area:** Lens UI / gameplay integration / solo expedition progression
+**Severity:** High
+**Status:** Open for targeted device verification (reported October 21–22, 2026)
+
+**Task**
+
+Ensure that the solo Last Witness expedition progresses reliably through all interactive stages and that selecting a Threshold or evidence option produces the expected next action.
+
+**Expected Behavior**
+
+When the solo player selects an available Threshold during the third interaction, the Lens should visibly acknowledge the choice, submit or apply the intended action, and advance or explain why progression is blocked. The subsequent stage should also present its instructions clearly on the relevant device.
+
+**Observed Behavior**
+
+During a solo playtest, the player could select a Threshold in stage three but no visible action followed. The fourth stage's behavior was uncertain because the player was away from the television during part of the interaction. The final Lens results screen was also judged visually inadequate. These are distinct issues: a reported progression problem, an unverified display path, and a presentation problem.
+
+**Investigation and Troubleshooting**
+
+1. Identified the stage-three selection as a reproducible test target, rather than assuming the underlying state failed to advance.
+2. Flagged stage four for simultaneous Lens and Fire TV observation.
+3. Identified a need for consistent feedback on selectable 2×2 grids and navigation actions.
+4. Prioritized a coherent finishing screen and return-to-lobby flow for the submission build.
+
+**Resolution / Current Status**
+
+The available playtest report does not establish a confirmed root cause or successful retest. This entry remains open until a fresh solo playthrough verifies stage-three selection, stage-four presentation, and the results screen. Do not treat UI changes or passing backend tests alone as resolution.
+
+**Development Impact**
+
+The issue affected confidence in the solo experience and required attention during the final submission window.
+
+**Lessons Learned**
+
+- Test transitions from the player's perspective on both Lens and television.
+- Distinguish an API/state transition from visible user feedback.
+- Treat results and recovery navigation as part of the core game loop.
+- Record exactly which stage was observed and which was not.
+
+---
+
+### DF-009 — Cross-Device Expedition Coordination and Navigation
+
+**Area:** Multiplayer UI / session lifecycle / Fire TV remote interactions
+**Severity:** Medium
+**Status:** Partially implemented; final multi-device verification pending
+
+**Task**
+
+Coordinate the same expedition across multiple Fire TVs and mobile Lenses, including calibration, player-specific interactions, navigation, and return-to-lobby or restart actions.
+
+**Expected Behavior**
+
+Each device should present the appropriate shared or private information for the current expedition state. Available 2×2 selection grids should respond to input. After calibration, users should have a clear route back to the lobby, and completed expeditions should offer understandable next steps.
+
+**Observed Behavior**
+
+The final gameplay review identified inconsistent navigation and presentation needs, including a return-to-lobby option on post-calibration screens, consistent selection behavior for 2×2 grids, and clearer choices at the finale. A proposed restart flow would allow reuse of recent calibration photos or fresh calibration; that option was considered deferrable under the submission deadline. These observations do not establish a single backend synchronization defect.
+
+**Investigation and Troubleshooting**
+
+1. Reviewed the user journey from calibration through the results screen.
+2. Distinguished Fire TV remote navigation from Lens touch interactions.
+3. Identified shared session state and per-device presentation as separate validation concerns.
+4. Proposed a consistent return-to-lobby affordance and a clear finale choice between lobby and new expedition.
+5. Deferred optional calibration-photo reuse if necessary to preserve a working submission build.
+
+**Resolution / Current Status**
+
+The October 22 source snapshot contains updated navigation and expedition code, but the available evidence does not confirm a complete post-change multi-device retest. Earlier remote-control navigation fixes remain documented in DF-006; this entry covers later workflow requirements and should not retroactively reopen the original defect.
+
+**Development Impact**
+
+Cross-device differences increased manual playtesting needs and made consistent user feedback especially important.
+
+**Lessons Learned**
+
+- Validate the same game moment on every participating device.
+- Keep shared state authoritative while allowing device-specific interfaces.
+- Test lobby return, reconnection, and replay separately.
+- Separate required navigation from optional quality-of-life features.
+
+---
+
+### DF-010 — AI Provider Migration and Environmental Grounding
+
+**Area:** AI integration / provider configuration / game design
+**Severity:** Medium
+**Status:** Provider migration implemented; full gameplay grounding still being refined
+
+**Task**
+
+Provide responsive AI-assisted environmental calibration and narrative gameplay without making the experience dependent on a single unavailable provider or allowing generated content to contradict game state.
+
+**Expected Behavior**
+
+Calibration analysis should use observations from players' actual rooms and objects. The Architect should adapt narration and prompts to supported environmental context, while deterministic game systems retain authority over evidence, progression, and outcomes.
+
+**Observed Behavior**
+
+The original AWS Bedrock inference path was blocked by access/quota constraints during development. The project moved to Gemini for cloud-backed analysis while retaining Ollama/Gemma as a local-development option. A successful Gemini room scan demonstrated useful environmental recognition, but subsequent gameplay review found that portions of the middle and ending did not feel sufficiently tied to the scanned environment or earlier choices. Provider availability and narrative cohesion were separate concerns.
+
+**Investigation and Troubleshooting**
+
+1. Separated AI-provider selection from core game rules.
+2. Adopted Gemini for cloud-backed workflows after the Bedrock blocker.
+3. Retained a local Ollama-based development option.
+4. Evaluated calibration output against actual room content.
+5. Identified environmental references and consequential choices as priorities for gameplay refinement.
+6. Kept structured game facts distinct from the Architect's potentially deceptive narration.
+
+**Resolution / Current Status**
+
+Gemini integration and environmental analysis are represented in the current implementation, and the user reported a successful room scan. The degree to which every later gameplay branch uses environmental evidence appropriately has not been established by a comprehensive final playthrough. Bedrock-specific quota and developer-experience details belong in [the Amazon friction log](./amazon.md), rather than being duplicated here.
+
+**Development Impact**
+
+The provider switch required integration work during a fixed development window. Environmental grounding also became a core gameplay-quality requirement rather than merely a calibration feature.
+
+**Lessons Learned**
+
+- Keep provider dependencies behind an explicit abstraction.
+- Evaluate model output in the context of the complete user journey, not only isolated requests.
+- Preserve canonical evidence and state outside generative responses.
+- Distinguish successful AI integration from successful game design.
+- Avoid claiming a model observed objects or evidence that the source images did not establish.
+
+---
+
 ## Documentation Notes
 
 Entries describe development challenges observed during Threshold implementation and the approaches used to resolve them.
@@ -461,3 +594,9 @@ Some entries describe integration complexity identified and addressed during imp
 Automated test success and successful compilation demonstrate the behavior covered by those checks but do not, by themselves, establish complete end-to-end validation across all physical devices or gameplay scenarios.
 
 The completed Last Witness playthrough validates the tested device and gameplay configuration. It does not establish exhaustive coverage of all player counts, network conditions, or session recovery scenarios.
+
+## Final-build verification note (October 22, 2026)
+
+The final gameplay overhaul introduced changes after some of the earlier friction entries were marked resolved. Those historical resolutions describe the behavior tested at the time, not blanket verification of the latest build. In particular, DF-005 and DF-006 should not be interpreted as proof that every new solo stage, 2×2 selection grid, multiplayer device configuration, or post-calibration navigation path is working. DF-008 and DF-009 track those later concerns separately.
+
+**Before updating an open status to resolved:** record the build or commit tested, device count, reproduction steps, expected and actual behavior, and whether validation was automated or performed on physical devices.
