@@ -463,7 +463,7 @@ app.post("/sessions/:code/advance", (request, response) => {
 });
 
 /**
- * Return an Expedition from calibration to the lobby.
+ * Return an Expedition from calibration or completed results to the lobby.
  *
  * Only a registered Fire TV can request this transition.
  * Players, Thresholds, and the Expedition code are preserved.
@@ -498,7 +498,7 @@ app.post("/sessions/:code/back", (request, response) => {
     return;
   }
 
-  if (session.phase !== "calibrating") {
+  if (session.phase !== "calibrating" && session.phase !== "results") {
     response.status(409).json({
       error: "invalid_phase_transition",
     });

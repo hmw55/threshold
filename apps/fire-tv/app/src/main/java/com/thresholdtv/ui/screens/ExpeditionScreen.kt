@@ -9,10 +9,16 @@ import android.widget.TextView
 import com.thresholdtv.ui.components.SurveillanceMonitor
 import com.thresholdtv.ui.components.SecurityInterruptionView
 import com.thresholdtv.ui.components.SignalNoiseView
+import com.thresholdtv.ui.components.ThresholdButton
+import com.thresholdtv.ui.components.GlitchCoordinator
 import com.thresholdtv.ui.ThresholdTheme
 import org.json.JSONObject
 
-class ExpeditionScreen(context: Context) : LinearLayout(context) {
+class ExpeditionScreen(
+    context: Context,
+    private val onReturnToLobby: () -> Unit,
+    private val onNewExpedition: () -> Unit
+) : LinearLayout(context) {
 
     private val monitors = listOf(
         SurveillanceMonitor(context, 1, "OPERATIVES"),
@@ -58,6 +64,28 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     private val scoreboard = text(19f, ThresholdTheme.Colors.Primary)
     private val footer = text(16f, ThresholdTheme.Colors.Secondary)
     private val decision = text(23f, ThresholdTheme.Colors.GlitchCyan)
+    private val resultsActions = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER
+        visibility = GONE
+    }
+    private val returnToLobbyButton = ThresholdButton(context).apply {
+        setLabel("RETURN TO LOBBY")
+        setOnClickListener { onReturnToLobby() }
+    }
+    private val newExpeditionButton = ThresholdButton(context).apply {
+        setLabel("NEW EXPEDITION")
+        setOnClickListener { onNewExpedition() }
+    }
+    private val resultsGlitch = GlitchCoordinator(
+        glitchTitle = {},
+        glitchFocusedButton = {
+            when {
+                returnToLobbyButton.hasFocus() -> returnToLobbyButton.glitch()
+                newExpeditionButton.hasFocus() -> newExpeditionButton.glitch()
+            }
+        }
+    )
     private var terminalPrompt = ""
     private var terminalChoices: List<String> = emptyList()
     private var terminalCompleted = false
@@ -68,7 +96,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     private var canReconcile = false
     private var currentPhase = ""
     private var lastFieldStage: String? = null
-    private val fieldChoices = listOf("preserve", "release", "erase")
+    private var fieldChoices = listOf("preserve", "release", "erase")
     private var fieldSelection = 0
 
 
@@ -107,10 +135,18 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         )
         panel.addView(decision)
         panel.addView(footer)
+        resultsActions.addView(returnToLobbyButton, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = 12 })
+        resultsActions.addView(newExpeditionButton, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
 
         addView(
             panel,
             LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+        addView(
+            resultsActions,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply {
+                setMargins(40, 8, 40, 20)
+            }
         )
 
         surveillanceGrid.addView(
@@ -131,6 +167,12 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         )
 
         surveillanceGrid.visibility = VISIBLE
+        monitors.forEachIndexed { index, monitor ->
+            monitor.setOnActivate {
+                selectedMonitor = index
+                expandMonitor()
+            }
+        }
         refreshMonitorSelection()
 
         // Keep the original layout intact; the overlay is attached above it.
@@ -215,6 +257,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         terminalChoices = emptyList()
         terminalFeedback = ""
         refreshGameplayLayout()
+        post { if (!hasResultsActions() && !isMonitorFocused()) monitors[selectedMonitor].requestFocus() }
     }
 
     fun update(data: JSONObject) {
@@ -300,7 +343,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                 scoreLines.add(name + " // " + player.optInt("score") + " PTS")
             }
         } else {
-            scoreLines.add("No points awarded yet.")
+            scoreLines.add("SCORES SEALED UNTIL FINAL TRANSMISSION")
         }
 
         scoreboard.text = scoreLines.joinToString("\n")
@@ -317,6 +360,8 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         val field = data.optJSONObject("fieldEncounter")
         if (field != null) {
             val fieldStage = field.optString("stage", "survey")
+            resultsActions.visibility = if (fieldStage == "complete") VISIBLE else GONE
+            if (fieldStage == "complete") resultsGlitch.start() else resultsGlitch.stop()
             val previousFieldStage = lastFieldStage
             if (previousFieldStage != null && previousFieldStage != fieldStage) {
                 val alert = when (fieldStage) {
@@ -328,11 +373,17 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                 if (alert != null) interruption.trigger(alert)
             }
             lastFieldStage = fieldStage
+            fieldChoices = if (fieldStage == "cooperation") listOf("pulse") else listOf("preserve", "release", "erase")
+            fieldSelection = fieldSelection.coerceIn(0, fieldChoices.size - 1)
             currentPhase = "field-$fieldStage"
             terminalChoices = emptyList()
             subtitle.text = "ARCHITECT // LIVE ENVIRONMENT"
             heading.text = field.optString("title", "THE LAST WITNESS")
-            progress.text = "ENCOUNTER ${field.optInt("progress") + 1} / ${field.optInt("total", 5)}"
+            progress.text = "ENCOUNTER ${field.optInt("progress") + 1} / ${field.optInt("total", 7)} // ${field.optInt("remainingSeconds")}s"
+            val cooperation = field.optJSONObject("cooperation")
+            if (fieldStage == "cooperation" && cooperation?.optBoolean("pulseAccepted", false) == true) {
+                terminalFeedback = "PULSE ACCEPTED // SIGNAL ACKNOWLEDGED"
+            }
             transmission.text = if (fieldStage == "fracture") {
                 buildString {
                     append("ARCHITECT // EVIDENCE CHALLENGE\n\n")
@@ -341,7 +392,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                     append(field.optString("transmission", ""))
                 }
             } else {
-                field.optString("transmission", "")
+                field.optString("transmission", "") + "\n\n" + field.optString("instruction", "")
             }
             val records = field.optJSONArray("prior")
             evidence.text = buildString {
@@ -355,7 +406,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                 }
                 if (records == null || records.length() == 0) append("Awaiting the first observation.")
             }
-            decision.text = if (field.optString("stage") == "verdict")
+            decision.text = if (field.optString("stage") == "decision" || field.optString("stage") == "verdict")
                 buildString {
                     append("PUBLIC STANCE // ")
                     fieldChoices.forEachIndexed { index, item -> append(if (index == fieldSelection) "> " else "  ").append(item.uppercase()).append("\n") }
@@ -368,9 +419,16 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             monitors[1].setContent(evidence.text.toString())
             monitors[2].setContent(transmission.text.toString())
             monitors[3].setContent(
-                if (fieldStage == "verdict") {
+                if (fieldStage == "cooperation") {
+                    "SPLIT SIGNAL // " + (cooperation?.optString("terminalRole", "TERMINAL") ?: "TERMINAL") +
+                        "\n\nTUNED CHANNELS // " + (cooperation?.optInt("tunedCount") ?: 0) + "/" + (cooperation?.optInt("total") ?: 0) +
+                        "\nTERMINAL PULSES // " + (cooperation?.optInt("pulses") ?: 0) +
+                        "\nPULSE WINDOW // " + (if (cooperation?.isNull("windowRemainingSeconds") == false) cooperation.optInt("windowRemainingSeconds").toString() + "s; 0 = RETRY BOTH" else "READY") +
+                        "\n\n" + (cooperation?.optString("terminalInstruction", "Tune every Lens first, then press SELECT.") ?: "Tune every Lens first, then press SELECT.") +
+                        "\n\nPRESS SELECT TO PULSE\n" + (if (terminalFeedback.isNotEmpty()) terminalFeedback else "")
+                } else if (fieldStage == "decision" || fieldStage == "verdict") {
                     buildString {
-                        append("FINAL VERDICT // PUBLIC STANCE\n\n")
+                        append(if (currentPhase == "field-cooperation") "SHARED SIGNAL // SELECT TO PULSE\n\n" else "FINAL VERDICT // PUBLIC STANCE\n\n")
                         fieldChoices.forEachIndexed { index, choice ->
                             append(if (index == fieldSelection) "▶ " else "    ")
                             append(choice.uppercase()).append("\n")
@@ -395,16 +453,22 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
                         "SIGNAL // ▂▅▃▇▂▄▆▃"
                 }
             )
-            footer.text = "THE ROOM IS THE GAME // CONTINUE ON YOUR LENS"
+            footer.text = if (fieldStage == "cooperation") "LENSES TUNE // SELECT TO SEND TERMINAL PULSE // MENU // NAVIGATION" else "THE ROOM IS THE GAME // MENU // NAVIGATION"
+            if (field.optString("transmission").contains("DECEIT DETECTED") && previousFieldStage != fieldStage) interruption.trigger("DECEIT DETECTED")
             refreshGameplayLayout()
+            if (fieldStage == "complete" && !returnToLobbyButton.hasFocus() && !newExpeditionButton.hasFocus()) {
+                post { returnToLobbyButton.requestFocus() }
+            }
             return
         }
+        resultsActions.visibility = GONE
+        resultsGlitch.stop()
         footer.text = when (phase) {
             "complete" -> "THE ARCHITECT REMEMBERS"
             "resolution" -> "DPAD UP/DOWN TO SELECT // PRESS SELECT TO CONFIRM"
             else -> if (terminalChoices.isNotEmpty() && !terminalCompleted)
                 "DPAD UP/DOWN TO CHOOSE // SELECT TO TRANSMIT"
-            else "CONTINUE THE INVESTIGATION ON YOUR LENS"
+            else "CONTINUE THE INVESTIGATION ON YOUR LENS // MENU // NAVIGATION"
         }
     }
     private fun refreshGameplayLayout() {
@@ -422,6 +486,9 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             if (expandedMonitor != null) GONE else VISIBLE
         expandedContainer.visibility =
             if (expandedMonitor != null) VISIBLE else GONE
+        if (!requiresDecision && expandedMonitor == null && !hasResultsActions() && !isMonitorFocused()) {
+            post { monitors[selectedMonitor].requestFocus() }
+        }
     }
 
     private fun renderDecision() {
@@ -511,6 +578,7 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
         expandedContainer.visibility = GONE
         surveillanceGrid.visibility = VISIBLE
         refreshMonitorSelection()
+        monitor.requestFocus()
         return true
     }
 
@@ -519,6 +587,8 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
             monitor.setMonitorSelected(index == selectedMonitor)
         }
     }
+
+    fun isMonitorFocused(): Boolean = monitors.any { it.hasFocus() }
 
     fun moveDecision(direction: Int): Boolean {
         if (currentPhase != "resolution") return false
@@ -539,10 +609,10 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     fun isFieldComplete(): Boolean =
         currentPhase == "field-complete" || currentPhase == "complete"
 
-    fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict"
+    fun isChoosingFieldVerdict(): Boolean = currentPhase == "field-verdict" || currentPhase == "field-decision" || currentPhase == "field-cooperation"
     private fun refreshFieldVerdictMonitor() {
         monitors[3].setContent(buildString {
-            append("FINAL VERDICT // PUBLIC STANCE\n\n")
+            append(if (currentPhase == "field-cooperation") "SHARED SIGNAL // SELECT TO PULSE\n\n" else "FINAL VERDICT // PUBLIC STANCE\n\n")
             fieldChoices.forEachIndexed { index, choice ->
                 append(if (index == fieldSelection) "▶ " else "    ")
                 append(choice.uppercase()).append("\n")
@@ -562,6 +632,12 @@ class ExpeditionScreen(context: Context) : LinearLayout(context) {
     fun selectedFieldVerdict(): String? = if (isChoosingFieldVerdict()) fieldChoices[fieldSelection] else null
 
     fun isChoosingTerminal(): Boolean = terminalChoices.isNotEmpty() && !terminalCompleted
+
+    fun hasResultsActions(): Boolean = resultsActions.visibility == VISIBLE
+
+    fun focusResultsActions() {
+        if (hasResultsActions()) returnToLobbyButton.requestFocus()
+    }
 
     fun moveTerminalSelection(direction: Int): Boolean {
         if (!isChoosingTerminal()) return false

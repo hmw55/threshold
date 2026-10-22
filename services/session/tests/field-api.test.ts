@@ -74,97 +74,13 @@ describe("field encounter API",()=>{
     expect(rejected.body.error).toBe("wrong_directive_object");
   });
 
-  it("confirms real objects and completes a solo session without fake evidence",async()=>{
-    const {code,headers}=await setup();
-    const opening = await request(app).get(`/sessions/${code}/threshold/game`).set("x-device-id","tv-1").expect(200);
-    expect(opening.body.game.timelinePhase).toBe("opening");
-    const created = await request(app).post(`/sessions/${code}/field/objects`).set(headers)
-      .send({name:"Dresser",location:"Bedroom"}).expect(201);
-    const id = created.body.object.id as string;
-    await request(app).post(`/sessions/${code}/field/observation`).set(headers)
-      .field("objectId",id).field("observation","I rotated the object to inspect its back.").field("action","rotate").expect(409);
-    const before = await request(app).get(`/sessions/${code}/field`).set(headers).expect(200);
-    expect(before.body.privateInstruction).toContain("PRIVATE DIRECTIVE");
-
-    const observation = await request(app).post(`/sessions/${code}/field/observation`).set(headers)
-      .field("objectId",id)
-      .field("observation","The dresser has a visible mark along the bottom drawer.")
-      .expect(200);
-
-    expect(observation.body.view.stage).toBe("signal");
-
-    let currentView = observation.body.view;
-
-    for (const stage of ["signal", "exchange"]) {
-      expect(currentView.stage).toBe(stage);
-      expect(currentView.target?.id).toBeTruthy();
-
-      const report = await request(app)
-        .post(`/sessions/${code}/field/observation`)
-        .set(headers)
-        .field("objectId", currentView.target.id)
-        .field(
-          "observation",
-          `I inspected the assigned ${currentView.target.name} and verified a real physical detail.`,
-        )
-        .expect(200);
-
-      currentView = report.body.view;
-    }
-
-    expect(currentView.stage).toBe("fracture");
-    expect(currentView.puzzle.choices.length).toBeGreaterThan(0);
-
-    // The public case exposes evidence, not the answer key.
-    const mystery = currentView.mystery;
-    expect(mystery).toBeTruthy();
-    expect(mystery.solution).toBeUndefined();
-    expect(mystery.clues.length).toBeGreaterThan(0);
-    expect(mystery.clues.every(
-      (clue: { requiredForSolution?: boolean }) =>
-        clue.requiredForSolution === undefined,
-    )).toBe(true);
-
-    // Submit published evidence alongside each candidate suspect.
-    // Incorrect deductions remain retryable; a supported one unlocks the verdict.
-    const evidenceIds = mystery.clues.map((clue: { id: string }) => clue.id);
-    let solved = false;
-    for (const item of currentView.puzzle.choices) {
-      const answer = await request(app).post(`/sessions/${code}/field/puzzle`).set(headers)
-        .send({choiceId: item.id, evidenceIds}).expect(200);
-      if (answer.body.correct) {
-        solved = true;
-        expect(answer.body.outcome).toBe("solved");
-        expect(answer.body.view.stage).toBe("verdict");
-        break;
-      }
-    }
-    expect(solved).toBe(true);
-
-    // The public Threshold participates in the final decision.
-    await request(app)
-      .post(`/sessions/${code}/threshold/field/verdict`)
-      .set("x-device-id", "tv-1")
-      .send({ choice: "release" })
-      .expect(200);
-
-    // The Lens submits an actual ending choice, not a witness identity.
-    const voted = await request(app)
-      .post(`/sessions/${code}/field/verdict`)
-      .set(headers)
-      .send({ choice: "release" })
-      .expect(200);
-
-    expect(voted.body.view.stage).toBe("complete");
-    expect(["release", "preserve"]).toContain(voted.body.view.ending);
-
-    await request(app)
-      .post(`/sessions/${code}/field/verdict`)
-      .set(headers)
-      .send({ choice: "erase" })
-      .expect(409);
-    const tv = await request(app).get(`/sessions/${code}/threshold/game`).set("x-device-id","tv-1").expect(200);
-    expect(tv.body.fieldEncounter.stage).toBe("complete");
+  it("uses the connected witness engine on the public display instead of a fictional reconstruction",async()=>{
+    const {code}=await setup();
+    const tv=await request(app).get(`/sessions/${code}/threshold/game`).set("x-device-id","tv-1").expect(200);
+    expect(tv.body.fieldEncounter.version).toBe(2);
+    expect(tv.body.fieldEncounter.stage).toBe("acquisition");
+    expect(tv.body.fieldEncounter.assignment).toBeNull();
     expect(tv.body.terminalChallenge).toBeNull();
+    expect(tv.body.fieldEncounter.witnessCase).toBeUndefined();
   });
 });

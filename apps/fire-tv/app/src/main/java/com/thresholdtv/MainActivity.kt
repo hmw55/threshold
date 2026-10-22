@@ -13,6 +13,7 @@ import com.thresholdtv.session.SessionController
 import com.thresholdtv.session.ThresholdState
 import com.thresholdtv.session.ConnectedThreshold
 import com.thresholdtv.ui.ThresholdTheme
+import com.thresholdtv.ui.NavigationMenu
 import com.thresholdtv.ui.screens.HomeScreen
 import com.thresholdtv.ui.screens.JoinExpeditionScreen
 import com.thresholdtv.ui.screens.CalibrationScreen
@@ -92,6 +93,7 @@ class MainActivity : Activity() {
     private var advancing = false
     private var returningToLobby = false
     private var restarting = false
+    private var navigationMenu: NavigationMenu? = null
 
 
     private var sessionCode: String? = null
@@ -137,7 +139,11 @@ class MainActivity : Activity() {
             onContinue = ::advance
         )
 
-        expedition = ExpeditionScreen(this)
+        expedition = ExpeditionScreen(
+            context = this,
+            onReturnToLobby = ::returnResultsToLobby,
+            onNewExpedition = ::startNewExpedition
+        )
         openingScreen = OpeningBriefingScreen(this, ::advance)
 
         if (sessions.hasSavedExpedition()) {
@@ -259,6 +265,13 @@ class MainActivity : Activity() {
         connecting = false
         restoring = false
 
+        if (message.startsWith("SESSION EXPIRED")) {
+            reset()
+            showHome()
+            android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+
         if (showingJoin) {
             join.showError(message)
             return
@@ -277,12 +290,14 @@ class MainActivity : Activity() {
     }
 
     private fun showHome() {
+        navigationMenu?.dismiss()
         state = ThresholdState.Idle
         setContentView(home)
         home.activate()
     }
 
     private fun showLobby() {
+        navigationMenu?.dismiss()
         lobby.updateSession(
             code = sessionCode,
             players = playerNames,
@@ -346,7 +361,103 @@ class MainActivity : Activity() {
         )
     }
 
+    private fun showNavigationMenu() {
+        if (navigationMenu?.isShowing == true) return
+        val activeSession = sessionCode != null && state != ThresholdState.Idle
+        val canReturnLobby = state == ThresholdState.Calibrating || state is ThresholdState.Results
+        val canStartNew = state is ThresholdState.Results || activeSession
+        val items = mutableListOf<NavigationMenu.Item>()
+        items += NavigationMenu.Item("RESUME EXPEDITION") { navigationMenu?.dismiss(); requestCurrentFocus() }
+        items += NavigationMenu.Item("RETURN TO LOBBY", canReturnLobby) {
+            navigationMenu?.dismiss()
+            if (state is ThresholdState.Results) returnResultsToLobby() else returnToLobby()
+        }
+        items += NavigationMenu.Item("LEAVE EXPEDITION", activeSession) {
+            showNavigationConfirmation(
+                "DISCONNECT TERMINAL?",
+                "Your TV will leave this expedition. Players and the room remain intact.",
+                "LEAVE EXPEDITION"
+            ) { leaveExpedition(force = true) }
+        }
+        items += NavigationMenu.Item("START NEW EXPEDITION", canStartNew) {
+            showNavigationConfirmation(
+                "START A NEW CASE?",
+                "The current case will close on this TV and a fresh expedition will open.",
+                "START NEW EXPEDITION"
+            ) {
+                startNewExpedition()
+            }
+        }
+        items += NavigationMenu.Item("REJOIN SAVED EXPEDITION", sessions.hasSavedExpedition()) {
+            navigationMenu?.dismiss()
+            reset()
+            restoring = true
+            connecting = true
+            state = ThresholdState.AwaitingPlayers
+            showLobby()
+            sessions.restorePreviousExpedition()
+        }
+        navigationMenu = NavigationMenu(
+            this,
+            title = if (activeSession) "CASE ${sessionCode ?: "----"}" else "STANDBY",
+            message = "REMOTE MENU // SELECT AN ACTION. BACK RETURNS TO THE SIGNAL.",
+            items = items,
+            onDismissed = { navigationMenu = null }
+        ).also { it.show() }
+    }
+
+    private fun showNavigationConfirmation(title: String, message: String, confirmLabel: String, confirm: () -> Unit) {
+        navigationMenu?.dismiss()
+        navigationMenu = NavigationMenu(
+            this,
+            title = title,
+            message = message,
+            items = listOf(
+                NavigationMenu.Item(confirmLabel) { navigationMenu?.dismiss(); confirm() },
+                NavigationMenu.Item("CANCEL") { navigationMenu?.dismiss(); showNavigationMenu() }
+            ),
+            onDismissed = { navigationMenu = null }
+        ).also { it.show() }
+    }
+
+    private fun requestCurrentFocus() {
+        when (state) {
+            ThresholdState.Calibrating -> calibration.requestFocus()
+            ThresholdState.AwaitingPlayers -> lobby.requestFocus()
+            is ThresholdState.Playing, is ThresholdState.Results -> expedition.requestFocus()
+            else -> home.requestFocus()
+        }
+    }
+
+    private fun returnResultsToLobby() {
+        if (returningToLobby || leaving || connecting || state !is ThresholdState.Results) return
+        returningToLobby = true
+        sessions.back(
+            onSuccess = { session ->
+                returningToLobby = false
+                applySessionPhase(session)
+            },
+            onFailure = { message ->
+                returningToLobby = false
+                android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show()
+            }
+        )
+    }
+
+    private fun startNewExpedition() {
+        if (leaving || connecting) return
+        if (state == ThresholdState.Idle) createExpedition()
+        else leaveExpedition(force = true, afterLeave = ::createExpedition)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN &&
+            (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_GUIDE)
+        ) {
+            if (navigationMenu?.isShowing == true) navigationMenu?.dismiss()
+            else showNavigationMenu()
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN &&
             (state is ThresholdState.Playing || state is ThresholdState.Results)
         ) {
@@ -354,15 +465,15 @@ class MainActivity : Activity() {
 
             if (key == KeyEvent.KEYCODE_BACK) {
                 if (expedition.collapseMonitor()) return true
+                return false
+            }
 
-                if (state is ThresholdState.Results ||
-                    expedition.isFieldComplete()
-                ) {
-                    leaveExpedition()
-                    return true
-                }
+            if (expedition.hasResultsActions()) {
+                return super.dispatchKeyEvent(event)
+            }
 
-                return true
+            if (expedition.isMonitorFocused()) {
+                return super.dispatchKeyEvent(event)
             }
 
             if (state is ThresholdState.Playing &&
@@ -393,6 +504,12 @@ class MainActivity : Activity() {
         keyCode: Int,
         event: KeyEvent?
     ): Boolean {
+        if (expedition.hasResultsActions()) {
+            return super.onKeyDown(keyCode, event)
+        }
+        if (expedition.isMonitorFocused()) {
+            return super.onKeyDown(keyCode, event)
+        }
         if (state is ThresholdState.Playing && expedition.isChoosingFieldVerdict()) {
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> { expedition.moveFieldVerdict(-1); return true }
@@ -701,11 +818,12 @@ class MainActivity : Activity() {
         setContentView(layout)
     }
 
-    private fun leaveExpedition() {
+    private fun leaveExpedition(force: Boolean = false, afterLeave: (() -> Unit)? = null) {
         if (leaving || connecting) return
         if (state != ThresholdState.AwaitingPlayers &&
             state !is ThresholdState.Results &&
-            !(state is ThresholdState.Playing && expedition.isFieldComplete())) return
+            !(state is ThresholdState.Playing && (force || expedition.isFieldComplete())) &&
+            !(force && state == ThresholdState.Calibrating)) return
 
         leaving = true
         lobby.setLeaving(true)
@@ -715,7 +833,7 @@ class MainActivity : Activity() {
                 leaving = false
                 lobby.setLeaving(false)
                 reset()
-                showHome()
+                afterLeave?.invoke() ?: showHome()
             },
             onFailure = { message ->
                 leaving = false
@@ -756,17 +874,18 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
+        if (navigationMenu?.isShowing == true) {
+            navigationMenu?.dismiss()
+            return
+        }
         if (state is ThresholdState.Playing && expedition.collapseMonitor()) {
             return
         }
         when {
             showingJoin -> cancelJoin()
 
-            state == ThresholdState.AwaitingPlayers ||
-                state is ThresholdState.Results ||
-                (state is ThresholdState.Playing && expedition.isFieldComplete()) -> {
-                leaveExpedition()
-            }
+            state == ThresholdState.AwaitingPlayers || state is ThresholdState.Results ||
+                state is ThresholdState.Playing || state == ThresholdState.Calibrating -> showNavigationMenu()
 
             state == ThresholdState.Calibrating -> {
                 returnToLobby()

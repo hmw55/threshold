@@ -100,6 +100,10 @@ export function FieldEvidenceCamera({
 
   return (
     <div className="field-evidence-camera">
+      <label>TAKE OR CHOOSE AN EVIDENCE PHOTO
+        <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={disabled}
+          onChange={e => { const file = e.target.files?.[0]; if (file) { setPreviewUrl(URL.createObjectURL(file)); onCapture(file); setActive(false); } }} />
+      </label>
       {error && <p role="alert" className="field-error">{error}</p>}
 
       {active || previewUrl ? (

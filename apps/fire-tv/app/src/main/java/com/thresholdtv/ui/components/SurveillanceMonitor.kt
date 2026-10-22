@@ -13,6 +13,8 @@ class SurveillanceMonitor(
     monitorTitle: String
 ) : LinearLayout(context) {
 
+    private var onActivate: (() -> Unit)? = null
+
     private val interference = SignalNoiseView(context, transparent = true)
 
     override fun dispatchDraw(canvas: android.graphics.Canvas) {
@@ -88,7 +90,12 @@ class SurveillanceMonitor(
     init {
         orientation = VERTICAL
         setPadding(28, 20, 28, 20)
-        isFocusable = false
+        isFocusable = true
+        isFocusableInTouchMode = true
+        setOnFocusChangeListener { _, hasFocus ->
+            setMonitorSelected(hasFocus)
+        }
+        setOnClickListener { onActivate?.invoke() }
 
         heading.apply {
             text = "%02d // %s".format(monitorNumber, monitorTitle)
@@ -129,6 +136,10 @@ class SurveillanceMonitor(
         if (content.text.toString() != value) {
             content.text = value
         }
+    }
+
+    fun setOnActivate(listener: () -> Unit) {
+        onActivate = listener
     }
 
     fun setMonitorSelected(value: Boolean) {

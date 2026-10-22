@@ -139,7 +139,7 @@ class SessionClient(
     fun submitFieldVerdict(code: String, choice: String): JSONObject =
         request(
             method = "POST",
-            path = "/sessions/${normalizeCode(code)}/threshold/field/verdict",
+            path = if (choice == "pulse") "/sessions/${normalizeCode(code)}/threshold/witness/pulse" else "/sessions/${normalizeCode(code)}/threshold/field/verdict",
             payload = JSONObject().put("choice", choice),
             headers = mapOf("x-device-id" to deviceId)
         )
@@ -155,13 +155,14 @@ class SessionClient(
         )
 
 
-    fun restartExpedition(code: String): ExpeditionSession =
+    fun restartExpedition(code: String, mode: String = "reuse"): ExpeditionSession =
         parseSession(
             request(
                 method = "POST",
                 path = "/sessions/${normalizeCode(code)}/restart",
                 payload = JSONObject()
                     .put("deviceId", deviceId)
+                    .put("mode", mode)
             ).getJSONObject("session")
         )
 

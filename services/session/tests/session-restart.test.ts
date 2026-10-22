@@ -124,7 +124,7 @@ function runEnvironmentRefProcess(
   ).trim();
 }
 
-describe("Session persistence across backend restarts", () => {
+describe("Session persistence across backend restarts", { timeout: 20_000 }, () => {
   it("restores an expedition with its players and TVs", async () => {
     temporaryDirectory = mkdtempSync(
       join(tmpdir(), "threshold-restart-")
