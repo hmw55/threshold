@@ -2,251 +2,225 @@
 
 > **Reality is playable.**
 
-Threshold is an AI-directed adventure game that transforms the player's physical environment into the game world.
+**An AI-directed mystery that turns your home into the game world.** Fire TVs become shared terminals called **Thresholds**. Phones become private **Lenses**. An unpredictable entity known as **the Architect** uses the rooms, objects, evidence, and decisions around you to direct an expedition that unfolds across screens *and* the physical environment.
 
-Fire TV devices become **Thresholds** — shared physical terminals distributed throughout the environment. Player phones become **Lenses**, allowing the game to perceive real-world spaces and privately communicate with individual players.
+**Featured expedition:** *The Last Witness* · **1–6 players** · **1–4 Fire TVs** · **approximately 8–12 minutes of gameplay** (excluding setup and calibration)
 
-An AI game master called **The Architect** dynamically directs each Expedition using the players, their surroundings, recognized objects, available Thresholds, previous decisions, and gameplay history.
+> **Project status — October 22, 2026:** Hackathon prototype with implemented cross-device gameplay, environmental calibration, and a cloud-deployed backend. The experience has been played through in a tested physical-device configuration; **not every player count, Fire OS version, recovery path, or gameplay variation has been validated end to end**.
 
-Rather than generating a traditional scavenger hunt, Threshold combines environmental interaction, observation, deduction, movement, coordination, deception, private objectives, branching decisions, and open-ended problem solving into replayable 15–20 minute Expeditions.
+Hackathon submission: Threshold is being submitted to the Fire TV primary track, with entries in the AWS Builder Mini Challenge and Open Source Mini Challenge.
 
-## Current Status
+<!-- ===================================================================== -->
+<!-- MEDIA TODO 1 — HERO IMAGE (HIGHEST PRIORITY)                         -->
+<!-- Capture: a real Fire TV showing the Architect's transmission, with   -->
+<!-- a phone running Lens visibly in the foreground. Prefer a landscape  -->
+<!-- 16:9 composition, no private addresses, session tokens, or faces     -->
+<!-- unless you have permission. Save as docs/media/threshold-hero.png.   -->
+<!-- Remove this comment when the image is ready.                          -->
+<!-- ===================================================================== -->
 
-Threshold is under active development for the **Build, Ship, Shape: Amazon Developer Hackathon**.
+**📸 HERO SCREENSHOT NEEDED:** `docs/media/threshold-hero.png` — Fire TV + phone in the same shot, immediately showing the two-screen concept.
 
-The initial application foundation and physical-device development environment are operational.
+<!-- When ready, replace the line above with:
+![Threshold: a Fire TV terminal and a mobile Lens sharing an expedition](docs/media/threshold-hero.png)
+-->
 
-**Implemented and validated:**
+## Watch the demo
 
-- Native Android/Kotlin Fire TV application.
-- Android API 25 minimum SDK support, enabling installation on Fire OS 6 devices.
-- Successful APK installation and application launch on physical Fire TV hardware.
-- React/TypeScript Lens web application with initial session joining and reconnection workflows.
-- TypeScript/Express session service supporting Expedition creation, joining, and reconnection.
-- Local communication between the Lens, session service, and Fire TV application.
-- Named-device deployment tooling for targeting individual Fire TV devices.
-- Multi-device ADB deployment and launch commands.
-- pnpm monorepo structure supporting independent application and service development.
+<!-- ===================================================================== -->
+<!-- MEDIA TODO 2 — DEMO VIDEO                                            -->
+<!-- Upload your finished 2-minute demo/trailer to YouTube or another     -->
+<!-- public host. Add the real URL below and link to the Devpost project. -->
+<!-- A YouTube thumbnail can be clickable using:                          -->
+<!-- [![Watch Threshold demo](docs/media/demo-thumbnail.png)](VIDEO_URL) -->
+<!-- Do not invent a video link before it exists.                          -->
+<!-- ===================================================================== -->
 
-**In development:**
+**🎬 VIDEO GOES HERE:** Add the **2-minute gameplay trailer** immediately under this heading. Show: session join → photographing a real object → public TV transmission + private Lens instruction → players moving/cooperating → the final choice. Store a representative still at `docs/media/demo-thumbnail.png` and replace this placeholder with a linked thumbnail or video link.
 
-- Multiple Thresholds participating in a shared Expedition.
-- Synchronized public events and zone-specific broadcasts.
-- AI-directed Expedition orchestration through The Architect.
-- Environmental perception and object recognition through Lenses.
-- Private player objectives, branching decisions, and adaptive gameplay.
-- AWS-backed authoritative game state and real-time communication.
+**Devpost submission:** _Add the published project link here after submission._
 
-The current implementation is an early development build, not a completed playable Expedition.
+## What makes Threshold different?
 
-## Gameplay Architecture
+- **Your environment is the level.** The Lens captures calibration photos and players confirm objects that can become puzzle anchors. The game must distinguish confirmed evidence from unverified AI guesses.
+- **The screens know different things.** Thresholds deliver shared transmissions and terminal interactions; Lenses hold private clues, tasks, evidence, and decisions.
+- **The Architect can mislead you.** AI shapes the narration and interprets observations, while a structured backend maintains the authoritative record of game events and permitted actions.
+- **People have to leave their seats.** Object inspection, movement, deduction, corroboration, and coordination connect the mystery to the actual room.
+- **Solo and multiplayer are intentionally different.** Solo challenges your memory and the Architect's claims; multiplayer introduces cooperation, suspicion, and optional deception when the player count allows.
+- **Your decisions matter.** Evidence, accusations, coordination, and a final archive vote shape the recorded outcome.
 
-Threshold separates the experience into three primary components.
+## See the game
 
-### Threshold — Fire TV
+<!-- ===================================================================== -->
+<!-- MEDIA TODO 3 — GAMEPLAY SCREENSHOT GALLERY                            -->
+<!-- Capture 4–6 genuine screenshots, ideally from the final demo build:  -->
+<!-- 1. docs/media/lens-calibration.png — object confirmation/photo flow  -->
+<!-- 2. docs/media/tv-architect.png — Architect transmission on Fire TV   -->
+<!-- 3. docs/media/lens-private-task.png — private instruction (no token) -->
+<!-- 4. docs/media/tv-signal.png — TV interaction / cooperative signal    -->
+<!-- 5. docs/media/lens-evidence.png — evidence or confrontation          -->
+<!-- 6. docs/media/lens-finale.png — final decision or polished results   -->
+<!-- Prefer real captures over mockups. Avoid exposing player identities, -->
+<!-- private house details, IPs, session codes, or credentials.            -->
+<!-- ===================================================================== -->
 
-`apps/fire-tv`
+| Screenshot to add | What it demonstrates |
+|---|---|
+| **📸 `docs/media/lens-calibration.png`** | A real object captured through Lens and presented for confirmation |
+| **📸 `docs/media/tv-architect.png`** | The Architect addressing the group through a Fire TV Threshold |
+| **📸 `docs/media/lens-private-task.png`** | A player's private instruction or clue |
+| **📸 `docs/media/tv-signal.png`** | A shared TV interaction, preferably the cooperative signal task |
+| **📸 `docs/media/lens-evidence.png`** | Evidence, an accusation, or an Architect contradiction |
+| **📸 `docs/media/lens-finale.png`** | The final decision/results interface |
 
-A native Android/Kotlin application that serves as the shared game interface.
+<!-- Once captured, replace the table above with a gallery, for example:
+| Calibration | The Architect | Private mission |
+|---|---|---|
+| ![Lens calibration](docs/media/lens-calibration.png) | ![TV transmission](docs/media/tv-architect.png) | ![Private Lens task](docs/media/lens-private-task.png) |
+| Cooperation | Evidence | Finale |
+|---|---|---|
+| ![TV cooperation](docs/media/tv-signal.png) | ![Lens evidence](docs/media/lens-evidence.png) | ![Lens finale](docs/media/lens-finale.png) |
+-->
 
-Each Threshold represents a physical terminal within the Expedition and can display:
+## How *The Last Witness* plays
 
-- Public Expedition state and objectives.
-- Messages and announcements from The Architect.
-- Timers, events, and collective decisions.
-- Zone-specific information and instructions.
-- Shared narrative developments.
+1. **Connect:** Start an expedition on Fire TV, join on phones with the session code, and optionally register additional TVs.
+2. **Calibrate:** Photograph parts of the environment. AI-assisted interpretation and player confirmation identify potential game objects.
+3. **Investigate:** Receive private assignments and public broadcasts; inspect objects and establish evidence.
+4. **Collaborate or deceive:** Depending on the player count and available objects, relocate and recover evidence, compare fragments, synchronize TV inputs, or accept a private offer.
+5. **Confront:** Challenge the Architect's account, corroborate evidence, and decide whom to trust.
+6. **Choose:** Vote to **preserve**, **release**, or **erase** the fictional archive and receive an ending. *Erase* is a narrative decision, **not** a promise to delete stored photos.
 
-Multiple Fire TV devices are intended to participate in the same Expedition while retaining their own identities and zone-specific experiences.
+**Design target:** 8–12 minutes of active gameplay. Calibration, connection, and device setup take additional time. Gameplay paths depend on available devices, player count, confirmed objects, and supported interactions.
 
-### Lens — Mobile Web
+### Gameplay flow
 
-`apps/lens`
+<!-- This PNG is part of the documentation reorganization; verify it has -->
+<!-- been copied to docs/diagrams/ before publishing this README.         -->
+![Threshold gameplay flow](docs/diagrams/Threshold-Gameplay-Flow(3).png)
 
-A React/TypeScript web application designed for player-specific interactions.
+[Gameplay design and stage details](docs/game-design.md) · [Editable gameplay flow diagram](docs/diagrams/threshold-gameplay-flow.mmd)
 
-Lenses provide:
+## How it works
 
-- Expedition joining and reconnection.
-- Player identity and session participation.
-- Private messages and objectives.
-- Environmental scanning and object recognition.
-- Individual decisions and interactions.
-- Information that should remain hidden from other players.
+| Component | Role | Technology |
+|---|---|---|
+| **Threshold** | Shared transmissions, terminal actions, zone-specific display | Native Android / Kotlin on Fire TV |
+| **Lens** | Phone-based calibration, private tasks, evidence, choices | React / TypeScript / Vite |
+| **Session service** | Authoritative membership, phases, game rules, persistence, APIs | Node.js / Express / TypeScript / SQLite |
+| **The Architect** | AI-assisted environmental interpretation and narrative direction | Gemini (cloud) or Ollama (local), behind a provider abstraction |
+| **Cloud infrastructure** | Hosted backend, private image storage, configuration, operational logs | AWS EC2, S3, IAM, Systems Manager, CloudWatch; Caddy HTTPS |
 
-The initial joining and reconnection workflows are implemented. Environmental perception and advanced gameplay interactions remain under development.
+**Important:** Amazon Bedrock was evaluated but inference was blocked by account-level quota/access restrictions in the tested account. **Bedrock is not a working runtime provider in this build.** The AWS deployment remains useful for compute, storage, identity, and monitoring.
 
-### The Architect — AI Game Master
+The Lens and backend are **separate services**: a working backend URL does not automatically provide a publicly hosted Lens website. The project uses HTTP-based client/server coordination and polling; do not assume a WebSocket-based real-time architecture.
 
-The Architect is the AI-driven orchestration layer responsible for directing each Expedition.
+### Architecture diagram
 
-Its planned responsibilities include:
+<!-- Verify this PNG is present after moving docs/architecture/ to       -->
+<!-- docs/diagrams/. Do not leave a broken image in the public README.    -->
+![Threshold AWS architecture](docs/diagrams/Threshold-AWS-Architecture(1).png)
 
-- Generating and adapting objectives.
-- Interpreting environmental observations.
-- Responding to player decisions and gameplay history.
-- Coordinating events across multiple Thresholds.
-- Delivering private instructions to individual Lenses.
-- Maintaining narrative continuity and pacing.
+[Full system architecture](docs/architecture.md) · [Editable AWS diagram](docs/diagrams/threshold-aws-architecture.mmd) · [Session lifecycle](docs/session-lifecycle.md)
 
-The Architect operates within defined gameplay rules rather than directly controlling authoritative session state.
+## Quick start for contributors
 
-### Session Service — Backend
-
-`services/session`
-
-A TypeScript/Express service providing the initial multiplayer session infrastructure.
-
-Current functionality includes:
-
-- Expedition session creation.
-- Session lookup.
-- Lens player joining.
-- Player reconnection.
-- Initial communication between application components.
-
-The backend is being extended to support multiple Fire TV devices, synchronized events, and authoritative Expedition state.
-
-### Game Platform — AWS
-
-The planned production infrastructure uses AWS services for authoritative game state, real-time communication, AI orchestration, environmental interpretation, and persistent Expedition history.
-
-The existing local session service provides a foundation for these capabilities while the AWS architecture is developed.
-
-**Core architectural principle:**
-
-> **Public gameplay belongs on Thresholds. Private gameplay and perception belong on Lenses.**
-
-## Repository Structure
-
-```text
-threshold/
-├── apps/
-│   ├── fire-tv/              # Native Android/Kotlin Fire TV application
-│   └── lens/                 # React/TypeScript mobile web application
-├── services/
-│   └── session/              # TypeScript/Express session backend
-├── packages/                 # Shared packages
-├── infra/                    # Infrastructure configuration
-├── scripts/                  # Fire TV development and deployment tooling
-├── docs/
-│   ├── architecture.md       # System architecture
-│   ├── game-design.md        # Gameplay systems and Expedition design
-│   └── friction-logs/
-│       ├── README.md         # Developer experience log overview
-│       ├── amazon.md         # Amazon-related developer experiences
-│       └── developer.md      # General engineering challenges
-├── dev-notes/
-│   ├── decisions.md          # Technical and architectural decisions
-│   └── development-environment.md
-├── package.json
-├── pnpm-workspace.yaml
-└── tsconfig.base.json
-```
-
-Some shared packages and infrastructure components are planned or under development.
-
-## Fire TV Development
-
-The Fire TV application is implemented in Kotlin and targets a minimum Android SDK version of API 25.
-
-Physical-device development uses Gradle and Android Debug Bridge (ADB).
-
-### Build the Application
-
-From the repository root:
+**Requirements:** Node.js **22+**, pnpm **10.18.0** (via Corepack), a Linux shell (WSL or Arch Linux recommended). Fire TV development additionally requires a supported JDK, Android SDK, ADB, and an Android-compatible Fire TV device. See the [complete development environment guide](dev-notes/development-environment.md) before configuring physical hardware or remote access.
 
 ```bash
+# Clone the repository and enter its root
+git clone https://github.com/hmw55/threshold.git
+cd threshold
+
+corepack enable
+pnpm install --frozen-lockfile
+
+# Terminal 1: session service, preserving existing local SQLite data
+pnpm dev:resume
+
+# Terminal 2: Lens development server
+pnpm --filter lens dev --host 0.0.0.0
+
+# Terminal 3: build the native Fire TV APK
 cd apps/fire-tv
 ./gradlew assembleDebug
 ```
 
-The generated APK is located at:
+- **Backend:** local port `3001` by default. Check `http://localhost:3001/health`.
+- **Lens:** use the URL printed by Vite; for a phone, configure `VITE_SESSION_SERVICE_URL` to an address the phone can actually reach. **`localhost` on a phone is the phone, not your computer.** WSL, firewall, and HTTPS configuration may be required.
+- **Fire TV:** install the APK with `adb install -r apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk` **from the repository root**, or use the named-device deployment scripts described below. Configure the device's reachable backend address first.
+- **AI:** configure `GEMINI_API_KEY` in the backend environment and choose Gemini, or run the supported Ollama setup locally. Keep credentials out of source control. See the [AI and environment guide](dev-notes/development-environment.md).
+- **Database safety:** `pnpm dev:resume` preserves the designated local SQLite data. **`pnpm dev:fresh` deletes the designated local expedition database**; don't use it during an active playtest.
+
+### Useful commands
+
+```bash
+pnpm check                       # lint + typecheck + tests
+pnpm build                       # build workspace packages with build scripts
+pnpm fire-tv:dev                 # interactive named-device selector
+pnpm fire-tv:dev monitor         # deploy to configured 'monitor' Fire TV
+pnpm fire-tv:deploy:all          # install on connected authorized TVs
+pnpm fire-tv:launch:all          # launch on connected authorized TVs
+```
+
+The Fire TV aliases live in the ignored local file `scripts/fire-tv-devices.local.json`. **Do not copy the original developer's device IPs or credentials into your configuration.** For exact script behavior, supported arguments, adding a TV, API request examples, and troubleshooting, use the component documentation below.
+
+## Documentation and repository map
 
 ```text
-apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk
+threshold/
+├── apps/
+│   ├── README.md                 # How the two client applications fit together
+│   ├── lens/README.md            # Mobile Lens setup and development
+│   └── fire-tv/README.md         # Android/Fire TV build, ADB and device setup
+├── services/session/README.md   # Session service, API, auth, AI and storage
+├── scripts/README.md            # Custom CLI scripts and device aliases
+├── docs/
+│   ├── architecture.md           # System design and trust boundaries
+│   ├── game-design.md            # The Last Witness gameplay and mechanics
+│   ├── session-lifecycle.md      # Session and expedition state transitions
+│   ├── diagrams/                 # Architecture and gameplay diagrams
+│   └── friction-logs/            # Amazon and general engineering feedback
+├── dev-notes/
+│   ├── development-environment.md # Contributor runbook
+│   └── decisions.md              # Technical decision records
+└── package.json
 ```
 
-To run the Android build and lint checks:
+**Start here:** [Complete contributor setup](dev-notes/development-environment.md) · [Backend API](services/session/README.md) · [Scripts reference](scripts/README.md) · [Fire TV guide](apps/fire-tv/README.md) · [Lens guide](apps/lens/README.md)
 
-```bash
-cd apps/fire-tv
-./gradlew clean assembleDebug lintDebug
-```
+**Understand the project:** [Game design](docs/game-design.md) · [Architecture](docs/architecture.md) · [Session lifecycle](docs/session-lifecycle.md) · [Technical decisions](dev-notes/decisions.md)
 
-### Deploy to a Named Fire TV
+**Development feedback:** [Friction log overview](docs/friction-logs/README.md) · [Amazon developer experience](docs/friction-logs/amazon.md) · [General developer friction](docs/friction-logs/developer.md)
 
-Threshold includes a development script for deploying to a specific Fire TV device using a friendly local name.
+## Testing and limitations
 
-From the repository root:
+The project has been compiled, tested, and exercised on physical Fire TV hardware, with a complete expedition reported in a tested configuration. Automated tests cover portions of session and game behavior, but the prototype is **not** a guarantee of full coverage for all 1–6-player combinations, 1–4-TV arrangements, network conditions, AI outcomes, or device-reconnection paths.
 
-```bash
-pnpm fire-tv:dev monitor
-```
+The experience uses photos of real environments. Only photograph spaces and objects you are authorized to capture; avoid personal documents, sensitive information, and unsafe object-moving tasks. AI descriptions are treated as fallible observations, not verified facts.
 
-The command builds the application, installs the APK on the selected device, and launches Threshold.
+For known engineering issues and their resolutions or open status, see the [developer friction logs](docs/friction-logs/README.md).
 
-Device aliases are configured locally in:
+## Open Source & Contributions
 
-```text
-scripts/fire-tv-devices.local.json
-```
+Threshold is an open-source project developed for the **Build, Ship, Shape: Amazon Developer Hackathon**.
 
-This file maps friendly names to ADB device identifiers and is excluded from version control.
+The project is released under the **MIT License**, allowing developers to use, study, modify, distribute, and build upon the source code, including for commercial purposes, provided the original copyright and license notices are preserved.
 
-The named-device script requires ADB and `jq` to be installed.
+Contributions are welcome, including bug fixes, performance improvements, accessibility enhancements, documentation, gameplay systems, and cross-device compatibility testing.
 
-### Deploy to Multiple Fire TVs
+To get started:
 
-Build the application and install it on all connected, authorized ADB devices:
+1. Read the [Development Environment & Contributor Guide](dev-notes/development-environment.md).
+2. Review the README for the application or service you want to contribute to.
+3. Create a branch for your changes.
+4. Run the relevant local checks and tests.
+5. Open a pull request describing your changes and how they were validated.
 
-```bash
-pnpm fire-tv:deploy:all
-```
+Bug reports, feature suggestions, and testing feedback can be submitted through [GitHub Issues](https://github.com/hmw55/threshold/issues).
 
-Launch Threshold on all connected devices:
+**License:** [MIT License](LICENSE) — Copyright © 2026 Holland M. Wesley.
 
-```bash
-pnpm fire-tv:launch:all
-```
+---
 
-These commands support development and testing across multiple physical Fire TV devices without repeatedly specifying individual ADB identifiers.
-
-Multi-device deployment does not, by itself, establish synchronized Expedition gameplay.
-
-## Documentation
-
-### Game Design & Architecture
-
-- [Game Design](docs/game-design.md) — Core gameplay systems, terminology, Expedition structure, and player interactions.
-- [System Architecture](docs/architecture.md) — Technical architecture, application boundaries, and communication between Thresholds, Lenses, and backend services.
-
-### Developer Experience & Feedback
-
-- [Developer Experience & Friction Logs](docs/friction-logs/README.md) — Overview of documented development experiences, technical challenges, and lessons learned.
-  - [Amazon Developer Experience Log](docs/friction-logs/amazon.md) — Fire TV hardware, Fire OS compatibility, Amazon tooling, and actionable platform feedback.
-  - [General Developer Friction Log](docs/friction-logs/developer.md) — Framework integration, build tooling, networking, and development environment challenges.
-
-### Development Notes
-
-- [Technical Decisions](dev-notes/decisions.md) — Architectural decisions and implementation tradeoffs.
-- [Development Environment](dev-notes/development-environment.md) — Local development setup, tooling, and configuration.
-
-## Development Philosophy
-
-Threshold separates deterministic game mechanics from AI-directed orchestration.
-
-Core state, player permissions, session membership, and gameplay rules remain authoritative and testable. AI is used to generate, adapt, interpret, and narrate experiences within defined system boundaries.
-
-The project prioritizes:
-
-- **Environmental gameplay:** Physical spaces and real-world objects become part of the experience.
-- **Shared and private information:** Thresholds coordinate collective gameplay while Lenses support individual perspectives.
-- **Adaptive storytelling:** Expeditions respond to player actions rather than following a fixed sequence.
-- **Multi-device coordination:** Multiple Fire TV devices contribute to a single shared experience.
-- **Reliable game state:** AI-generated actions are validated against deterministic rules and backend state.
-- **Replayability:** Changing environments, players, and decisions produce different Expeditions.
-
-The goal is not to place a chatbot on a television.
-
-**The goal is to make the room itself part of the game.**
+**Threshold isn't a game you play in a room. The room is part of the game.**

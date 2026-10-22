@@ -1,190 +1,169 @@
 # Threshold — Session Lifecycle
 
-## Overview
+> **Scope:** Session creation, membership, reconnection, phase transitions, return to lobby, restart, and closure for *The Last Witness*.
+>
+> **Source basis:** October 22, 2026 `main` snapshot (`b9980ee`). This documents server behavior visible in source; cross-device runtime behavior still requires physical-device verification.
 
-Threshold uses a shared Expedition session to coordinate Fire TV devices (Thresholds) and companion-device players (Operatives).
+## 1. Overview
 
-The session service is implemented using Express and TypeScript. It maintains expedition membership, device assignments, player registrations, and shared session metadata.
+An **Expedition** is a shared session containing registered Fire TV **Thresholds** and mobile **Lens** players. The Node.js/Express session service maintains membership and authoritative phase metadata. Fire TV and Lens clients use HTTP requests and polling rather than WebSockets.
 
-**Current implementation:** Session state is stored in an in-memory `Map`. This is suitable for the current development prototype but does not survive service restarts or support synchronization across multiple service instances.
+The service keeps active sessions in a process-local map **and persists session records to SQLite** through `services/session/src/sessionStore.ts`. This is not a multi-instance coordination system; persistence alone does not provide automatic failover or synchronized state across multiple server processes.
 
-## Session Model
+## 2. Session model
 
-Each Expedition contains:
-
-| Field | Description |
+| Property | Meaning |
 |---|---|
-| `code` | Unique four-character Expedition identifier |
-| `players` | Registered Lens players |
-| `thresholds` | Registered Fire TV devices |
-| `status` | `awaiting_players` or `ready` |
-| `phase` | Expedition lifecycle phase |
+| `code` | Four-character Expedition join code |
+| `players` | Registered Lens players, each with an ID and display name |
+| `thresholds` | Registered Fire TVs with a Threshold ID, device ID, zone, and join timestamp |
+| `status` | `awaiting_players` or `ready`, derived from player membership |
+| `phase` | `lobby`, `calibrating`, `ready`, `playing`, or `results` |
 
-Each registered Threshold contains a unique ID, persistent device ID, zone name, and join timestamp.
+A session supports up to **four Thresholds**. The target gameplay experience supports **one to six Lens players**; do not assume the server enforces that player maximum without checking the join handler.
 
-Each registered player contains a unique player ID and display name.
+Threshold zones are assigned from: **THE NEXUS**, **THE VEIL**, **THE RELIQUARY**, and **THE OBSERVATORY**.
 
-## Expedition Creation
+## 3. Session lifecycle at a glance
 
-**Endpoint:** `POST /sessions`
+```mermaid
+stateDiagram-v2
+    [*] --> lobby: Create Expedition
+    lobby --> calibrating: Advance when ready
+    calibrating --> ready: Advance after required uploads
+    ready --> playing: Advance
+    playing --> results: Complete expedition / advance
+    calibrating --> lobby: Back
+    playing --> lobby: Back when allowed
+    results --> lobby: Back
+    calibrating --> lobby: Restart (reuse / rescan)
+    ready --> lobby: Restart (reuse / rescan)
+    playing --> lobby: Restart (reuse / rescan)
+    results --> lobby: Restart (reuse / rescan)
+    lobby --> [*]: Final Threshold departs
+    calibrating --> [*]: Final Threshold departs
+    ready --> [*]: Final Threshold departs
+    playing --> [*]: Final Threshold departs
+    results --> [*]: Final Threshold departs
+```
 
-1. The Fire TV sends its persistent `deviceId`.
-2. The session service generates a unique four-character Expedition code.
-3. A new session is created in the `lobby` phase.
-4. The creating Fire TV is assigned `THE NEXUS`.
-5. The session is returned to the client.
+The diagram summarizes the supported lifecycle; individual transitions are subject to server-side guards. In particular, **Back** and **Restart** have different permissions and data-retention effects.
 
-The endpoint temporarily supports creation without a `deviceId` for compatibility with older clients.
+## 4. Creating and joining
 
-## Joining an Expedition
+### Create — `POST /sessions`
 
-### Fire TV
+A Fire TV can create an Expedition with its persistent `deviceId`. The service allocates a code and registers the creating TV. The first assigned zone is **THE NEXUS**. A compatibility path may accept creation without a device ID; new clients should provide one.
 
-**Endpoint:** `POST /sessions/:code/thresholds`
+### Add Fire TV — `POST /sessions/:code/thresholds`
 
-A joining Fire TV submits its persistent `deviceId`.
+A TV supplies its device ID. Re-registering an already known device returns its existing registration rather than creating a duplicate. New TVs may join during the **lobby** phase, subject to the four-Threshold maximum. Existing assignments are retained when another TV leaves.
 
-The service:
+### Add Lens player — `POST /sessions/:code/join`
 
-1. Verifies that the Expedition exists.
-2. Returns the existing Threshold if the device is already registered.
-3. Rejects new registrations outside the lobby phase.
-4. Enforces a maximum of four registered Thresholds.
-5. Assigns the first available zone.
+The Lens supplies a nonempty display name while the Expedition is in the **lobby**. The server creates a player ID **and a player token**, stores a hash of that token, and returns the token to the joining client. A player joining makes the session `ready` when at least one player is present.
 
-Available zones, in assignment order:
+**Security distinction:** A join code is a discovery mechanism, not strong authentication. The player token is used to verify reconnection; the TV's device ID should not be treated as a cryptographically authenticated device identity.
 
-1. THE NEXUS
-2. THE VEIL
-3. THE RELIQUARY
-4. THE OBSERVATORY
+## 5. Reconnection
 
-### Lens Player
+### Fire TV — `POST /sessions/:code/thresholds/reconnect`
 
-**Endpoint:** `POST /sessions/:code/join`
+A returning TV supplies its persistent device ID. If its registration still exists, the service returns the original Threshold identity, zone, and session without registering a second TV. If the session or registration no longer exists, the server returns a not-found error. The Fire TV client has local session restoration behavior; recovery after an app kill or network interruption should be verified on actual hardware.
 
-A player submits a display name.
+### Lens — `POST /sessions/:code/reconnect`
 
-The service creates a player ID and registers the player with the Expedition.
+The Lens supplies **both `playerId` and `playerToken`**. The server checks membership and verifies the credential; a missing or incorrect token results in `401 invalid_player_credentials`. A valid request returns the existing player and session state without adding a duplicate player. Browser-side token storage and restoration are separate client concerns.
 
-New player registrations are permitted only during the lobby phase.
+## 6. Shared phase transitions
 
-The session's status becomes `ready` when at least one player is registered.
+**Endpoint:** `POST /sessions/:code/advance`
 
-## Reconnection
+Only a **registered Fire TV device ID** can request an advance. The backend checks the current phase and applies the configured `PHASE_TRANSITIONS` map, then persists the new session phase.
 
-### Fire TV Reconnection
+- **Lobby → calibration:** Requires the session to be `ready` (at least one registered player).
+- **Calibration → ready:** Requires at least one uploaded calibration image for **each registered Threshold**. Scan groups in `uploaded`, `analyzing`, `completed`, or `failed` status can satisfy this gate if they contain an image. **AI analysis completion is not required** to advance.
+- **Ready → playing:** Initializes the *Last Witness* game state and opening missions.
+- **Playing → results:** Progression is governed by the shared phase transition handler; the gameplay completion path must be tested against the active witness/field flow.
+- **Results:** No further normal advance; the service returns a conflict for an already completed Expedition.
 
-**Endpoint:** `POST /sessions/:code/thresholds/reconnect`
+This phase contract is server-managed. Individual Lens and Fire TV presentation states may still lag until their next poll.
 
-The Fire TV submits its persistent `deviceId`.
+## 7. Return to lobby versus new Expedition
 
-The service locates the existing Threshold registration and returns it without creating a duplicate.
+These operations are deliberately different.
 
-Successful reconnection preserves:
+| Operation | Endpoint | Effect |
+|---|---|---|
+| **Back to lobby** | `POST /sessions/:code/back` | Changes the session phase to `lobby`; preserves code and registrations. Does **not** itself guarantee a fresh mystery or cleared calibration data. |
+| **Restart, reuse** | `POST /sessions/:code/restart` with `mode: "reuse"` | Returns to lobby, preserves players/TVs/code and existing calibration images, resets scan-group state for reuse, and deletes the previous game state. |
+| **Restart, rescan** | Same endpoint with `mode: "rescan"` | Returns to lobby, preserves players/TVs/code, removes stored calibration images and scan groups, and deletes the previous game state. |
 
-- Threshold ID
-- Device ID
-- Assigned zone
-- Original join timestamp
+Both operations require a registered TV's `deviceId`.
 
-The Fire TV stores its active Expedition code locally and attempts restoration on application startup.
+**Back** is accepted during calibration and results, and during gameplay when the witness is complete **or** the caller explicitly requests `endActiveExpedition: true`. It is not a general unrestricted phase-reset endpoint.
 
-If the Expedition no longer exists, or the device is no longer registered, the service responds with HTTP 404.
+**Restart** rejects an unknown mode and a session already in the lobby. The `rescan` path attempts to remove physical images before deleting their database records; a cleanup failure returns an error rather than silently claiming success.
 
-Temporary network failures do not automatically invalidate the locally saved Expedition code.
+The **new Expedition** wording in the UI should be distinguished from creating a completely new session code: this restart endpoint **reuses the existing Expedition code and registrations**.
 
-### Lens Player Reconnection
+## 8. Leaving and closure
 
-**Endpoint:** `POST /sessions/:code/reconnect`
+### Remove player — `DELETE /sessions/:code/players/:playerId`
 
-The Lens submits its previously assigned `playerId`.
+Removes a Lens player and recalculates session status. Other players and Thresholds remain in the Expedition. Credential cleanup and any authorization requirements should be checked against the route before claiming strong leave-request authentication.
 
-The service returns the existing player registration and shared Expedition state.
+### Remove TV — `DELETE /sessions/:code/thresholds/:deviceId`
 
-The backend supports player reconnection; client-side persistence and restoration should be verified independently.
+Removes that Threshold registration. If other TVs remain, the Expedition remains open and their zones stay unchanged. If the **last TV leaves**, the service removes the session from active memory and persistent storage and closes the Expedition. Closure is distinct from reaching the `results` phase.
 
-## Leaving an Expedition
+## 9. Failure and recovery boundaries
 
-### Fire TV Departure
-
-**Endpoint:** `DELETE /sessions/:code/thresholds/:deviceId`
-
-The service removes the matching Threshold registration.
-
-If other Thresholds remain connected, the Expedition stays active and their assigned zones remain unchanged.
-
-If the departing Threshold is the final registered TV, the Expedition is deleted.
-
-On successful explicit departure, the Fire TV clears its locally saved Expedition code.
-
-### Lens Player Departure
-
-**Endpoint:** `DELETE /sessions/:code/players/:playerId`
-
-The player is removed from the Expedition.
-
-The service recalculates the session status based on the remaining player count.
-
-Player departure does not independently close an Expedition.
-
-## Expedition Phases
-
-The backend currently defines these phases:
-
-| Phase | Intended meaning |
+| Scenario | Server behavior / caveat |
 |---|---|
-| `lobby` | Devices and players assemble |
-| `calibrating` | Environment calibration |
-| `ready` | Expedition prepared to begin |
-| `playing` | Active gameplay |
-| `results` | Expedition results |
+| Unknown Expedition | `404 session_not_found` |
+| Unknown TV on reconnect | `404 threshold_not_found` |
+| Unknown Lens player on reconnect | `404 player_not_found` |
+| Invalid Lens reconnection token | `401 invalid_player_credentials` |
+| Unregistered TV tries to advance, go back, or restart | `403 threshold_not_registered` |
+| Advance before lobby is ready | `409 expedition_not_ready` |
+| Advance without a required Threshold scan | `409 calibration_incomplete` |
+| Late join / TV limit / invalid phase | Conflict response according to route |
+| Temporary network loss | Client polling/retry and restoration need device-level validation |
+| Process restart | SQLite records provide a persistence mechanism; verify startup loading and active-game recovery rather than assuming uninterrupted gameplay |
+| Multiple server instances | No demonstrated cross-instance session synchronization |
 
-**Implementation distinction:** The Fire TV currently handles gameplay phase progression locally. The inspected backend endpoints do not establish synchronized, server-authoritative phase transitions.
+## 10. Persistence and trust boundaries
 
-Future gameplay orchestration must define how phase changes are validated, persisted, and distributed across Fire TV and Lens clients.
+SQLite stores sessions and related game/scan data in the server-side storage module. Calibration image bytes may be stored locally or in private S3 depending on configuration. The session service coordinates gameplay facts; AI-generated narrative does **not** supersede server-maintained phase, membership, evidence, or outcome state.
 
-## Failure and Recovery
+Player credentials, session join codes, and device IDs serve different purposes. Public release should include an explicit review of route authorization, image retention, CORS policy, and abuse controls.
 
-| Condition | Current behavior |
-|---|---|
-| Unknown Expedition | HTTP 404, `session_not_found` |
-| Unknown Threshold during reconnect | HTTP 404, `threshold_not_found` |
-| Unknown player during reconnect | HTTP 404, `player_not_found` |
-| Missing device ID | HTTP 400 |
-| Joining after the lobby phase | HTTP 409 |
-| Maximum Thresholds reached | HTTP 409 |
-| Temporary Fire TV connection failure | Local session code retained during restoration |
-| Session service restart | In-memory Expeditions lost |
-| Final Fire TV departure | Expedition deleted |
+## 11. Validation checklist
 
-## Current Limitations
+- [ ] Create an Expedition on Fire TV; confirm code and initial zone.
+- [ ] Join a Lens; confirm `ready` status and player-token issuance.
+- [ ] Add second TV; verify distinct zone and synchronized session membership.
+- [ ] Reconnect the same TV; verify no duplicate registration.
+- [ ] Reconnect Lens with valid token; verify identity restoration.
+- [ ] Reject Lens reconnection with incorrect token.
+- [ ] Reject phase advance before a player joins.
+- [ ] Verify each TV's calibration image requirement; confirm AI analysis can remain pending.
+- [ ] Complete solo and multiplayer phase progression through results.
+- [ ] Return from calibration/results to lobby using **Back**.
+- [ ] Test `reuse` and `rescan` restarts, including image retention/deletion.
+- [ ] Remove one of multiple TVs, then the last TV; confirm closure semantics.
+- [ ] Restart backend and verify session/game recovery from SQLite.
+- [ ] Test transient disconnection on physical Fire TVs and Lenses.
 
-- Session state is not persisted to a database.
-- No automatic session expiration or inactivity cleanup is implemented in the inspected code.
-- There is no server-authoritative gameplay phase transition mechanism in the inspected endpoints.
-- Fire TV lobby synchronization uses polling rather than server-pushed updates.
-- Device identity relies on a locally stored identifier rather than authenticated device credentials.
-- The Express service currently enables unrestricted CORS.
-- Expedition completion and Expedition departure are not yet represented as distinct backend lifecycle operations.
+Do not mark these complete solely because a matching route or automated test exists.
 
-## Validation
+## 12. Related documentation
 
-Current automated backend coverage includes session creation, player registration and departure, Threshold registration and departure, and reconnection behavior.
+- [System architecture](architecture.md)
+- [Game design](game-design.md)
+- [Gameplay flow diagram](diagrams/threshold-gameplay-flow.mmd)
+- [Game systems diagram](diagrams/threshold-game-architecture.mmd)
+- [Developer friction logs](friction-logs/README.md)
 
-As of this documentation pass, the session service test suite passes 25 tests across five files.
-
-The Fire TV Android debug build also succeeds with the session restoration implementation.
-
-**Remaining validation:** Restart the Fire TV application during an active Expedition and confirm that it restores the original code, Threshold ID, and assigned zone.
-
-## Planned Evolution
-
-Before introducing synchronized multiplayer gameplay and AI-driven orchestration:
-
-1. Define the authoritative session phase-transition contract.
-2. Establish explicit Expedition completion and cleanup behavior.
-3. Add durable session storage when deployment requirements justify it.
-4. Define event contracts for Fire TV, Lens, and orchestration services.
-5. Add end-to-end reconnection tests across client and backend boundaries.
-6. Introduce appropriate authentication, authorization, and production CORS restrictions.
+**Primary implementation references:** `services/session/src/routes/sessionRoutes.ts`, `services/session/src/sessionStore.ts`, and the Fire TV/Lens session clients.

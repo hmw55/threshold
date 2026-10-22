@@ -1,0 +1,79 @@
+flowchart TB
+    subgraph REAL["PHYSICAL PLAY SPACE"]
+      ROOM["Rooms and real objects"]
+      ACT["Physical actions and observations"]
+    end
+
+    subgraph DEV["PLAYER DEVICES"]
+      TV["Fire TV Thresholds<br/>Kotlin / Jetpack Compose<br/>Shared displays and remote input"]
+      LENS["Mobile Lenses<br/>React / TypeScript<br/>Photos, evidence, private choices"]
+    end
+
+    subgraph SERVICE["SHARED SESSION SERVICE — NODE.JS / EXPRESS"]
+      API["HTTP routes<br/>Sessions / Thresholds / Calibration<br/>Field gameplay / Witness"]
+      SESS["Session and device management<br/>Players, TV registration, reconnection"]
+      VIEW["Client-facing expedition views<br/>Polling and shared state"]
+    end
+
+    subgraph GAME["SERVER-AUTHORITATIVE GAMEPLAY"]
+      LIFE["Expedition lifecycle<br/>Lobby → Calibration → Ready<br/>Playing → Results"]
+      ENV["Environment model<br/>Scan groups, objects, confirmations"]
+      FIELD["Field expedition<br/>Observations, puzzles, TV choices"]
+      WITNESS["Last Witness<br/>Evidence, decisions, finale"]
+    end
+
+    subgraph INTEL["AI AND ARCHITECT"]
+      AI["AI provider abstraction"]
+      VISION["Calibration and witness vision<br/>Image interpretation"]
+      ARCH["Architect services<br/>Narrative and decisions"]
+      GEM["Gemini — configured cloud provider"]
+      LOCAL["Ollama — local development option"]
+    end
+
+    subgraph STORE["DATA AND HOSTING"]
+      SQLITE[("SQLite<br/>Sessions and game state")]
+      IMAGES[("Calibration image storage<br/>Private S3 in cloud / local filesystem in dev")]
+      EC2["EC2 deployment<br/>Hosts session service"]
+    end
+
+    ROOM -->|"Calibration photos"| LENS
+    ACT -->|"Player-reported interactions"| LENS
+    TV <-->|"HTTP requests / polling"| API
+    LENS <-->|"HTTP requests / polling"| API
+    API --> SESS
+    API --> LIFE
+    API --> ENV
+    API --> FIELD
+    API --> WITNESS
+    SESS --> VIEW
+    LIFE --> VIEW
+    FIELD --> VIEW
+    WITNESS --> VIEW
+    VIEW --> API
+    ENV --> FIELD
+    ENV --> WITNESS
+    FIELD --> WITNESS
+    API -->|"Analyze scans"| VISION
+    VISION -->|"Object candidates and observations"| ENV
+    FIELD -->|"Gameplay context"| ARCH
+    WITNESS -->|"Evidence and decisions"| ARCH
+    ARCH -->|"Narrative / decisions"| WITNESS
+    VISION --> AI
+    ARCH --> AI
+    AI --> GEM
+    AI -.-> LOCAL
+    SESS <--> SQLITE
+    LIFE <--> SQLITE
+    API <--> IMAGES
+    EC2 -.->|"Hosts"| SERVICE
+
+    classDef device fill:#dcecff,stroke:#2876c7,color:#153653
+    classDef game fill:#dff5e5,stroke:#29935d,color:#153d2a
+    classDef intelligence fill:#f0e0ff,stroke:#9251c5,color:#40205e
+    classDef storage fill:#fff0d4,stroke:#d39a32,color:#553b12
+    classDef physical fill:#ffe3e7,stroke:#cf6271,color:#632934
+    class TV,LENS device
+    class LIFE,ENV,FIELD,WITNESS game
+    class AI,VISION,ARCH,GEM,LOCAL intelligence
+    class SQLITE,IMAGES,EC2 storage
+    class ROOM,ACT physical

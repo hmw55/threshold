@@ -1,0 +1,34 @@
+flowchart TD
+    START["1 · Launch on Fire TV<br/>Create or join an expedition"]
+    JOIN["2 · Players join via mobile Lenses<br/>Enter expedition code"]
+    TVS["Optional: additional Fire TVs<br/>Join the same expedition"]
+    MODE{"Solo or multiplayer?<br/>Determined by joined players"}
+    CAL["3 · Environmental calibration<br/>Capture rooms and objects using Lenses"]
+    BRIEF["4 · Architect briefing<br/>Begin The Last Witness"]
+    subgraph INVESTIGATION["5 · INVESTIGATE, DISCOVER AND INTERACT"]
+      OBS["Explore rooms and examine objects"]
+      TRANS["Receive Architect transmissions<br/>Shared TV and private Lens information"]
+      PUZZLE["Solve puzzles and make decisions"]
+      SOCIAL["Collaborate or compete<br/>When supported by player count"]
+      EFFECT["Actions affect evidence and consequences"]
+      OBS --> TRANS --> PUZZLE --> SOCIAL --> EFFECT
+      EFFECT -.->|"Continue investigation"| OBS
+    end
+    FINALE["6 · Finale<br/>Revelations and consequences"]
+    RESULTS["Results and outcomes<br/>Truth, partial understanding, or surprises"]
+    REPLAY["Replay another expedition"]
+    START --> JOIN
+    START -.-> TVS
+    JOIN --> MODE
+    TVS --> MODE
+    MODE --> CAL --> BRIEF --> OBS
+    EFFECT -->|"Expedition concludes"| FINALE
+    FINALE --> RESULTS --> REPLAY
+    classDef tv fill:#dcecff,stroke:#2876c7,color:#153653
+    classDef lens fill:#dff5e5,stroke:#29935d,color:#153d2a
+    classDef ai fill:#f0e0ff,stroke:#9251c5,color:#40205e
+    classDef result fill:#fff0d4,stroke:#d39a32,color:#553b12
+    class START,TVS tv
+    class JOIN,CAL,OBS,PUZZLE lens
+    class BRIEF,TRANS ai
+    class FINALE,RESULTS,REPLAY result
