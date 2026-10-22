@@ -9,6 +9,7 @@ import {
 } from "../sessionStore.js";
 import { readImage } from "../imageStorage.js";
 import { createAiProvider } from "./createAiProvider.js";
+import { logOperationalEvent } from "../operationalLogger.js";
 
 interface VisualObject {
   name: string;
@@ -85,6 +86,13 @@ export async function analyzeCalibration(
 
   if (!claimed) return;
 
+  const startedAt = performance.now();
+  let objectCount = 0;
+
+  logOperationalEvent("info", {
+    event: "calibration.analysis.started",
+  });
+
   try {
     const images = listScanImages(scanGroupId);
 
@@ -92,11 +100,7 @@ export async function analyzeCalibration(
       throw new Error("calibration_images_missing");
     }
 
-    const provider = createAiProvider({
-      provider: "ollama",
-      ollamaModel: "gemma3:4b",
-      ollamaTimeoutMs: 120_000,
-    });
+    const provider = createAiProvider();
 
     if (!provider.analyzeImage) {
       throw new Error("vision_provider_unavailable");
@@ -133,7 +137,6 @@ export async function analyzeCalibration(
           "Use an empty objects array if nothing is recognizable.",
         ].join(" "),
         {
-          model: "gemma3:4b",
           systemPrompt:
             "You are a cautious visual inventory system. " +
             "Only identify objects visibly present in the photograph. " +
@@ -185,6 +188,7 @@ export async function analyzeCalibration(
         });
 
         knownNames.add(key);
+        objectCount += 1;
       }
     }
 
@@ -193,13 +197,23 @@ export async function analyzeCalibration(
       "analyzing",
       "completed",
     );
-  } catch (error) {
-    console.error("Calibration vision analysis failed:", error);
+    logOperationalEvent("info", {
+      event: "calibration.analysis.completed",
+      durationMs: Math.round(performance.now() - startedAt),
+      objectCount,
+    });
+  } catch {
+    console.error("Calibration vision analysis failed");
 
     transitionScanGroupStatus(
       scanGroupId,
       "analyzing",
       "failed",
     );
+    logOperationalEvent("error", {
+      event: "calibration.analysis.failed",
+      durationMs: Math.round(performance.now() - startedAt),
+      errorCode: "calibration_analysis_failed",
+    });
   }
 }
