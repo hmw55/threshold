@@ -5,6 +5,7 @@ import {
   startFieldExpedition,
   initializeFieldDisplacement,
   fieldDisplacementView,
+  FieldState,
   fieldView,
   submitDisplacementAction,
   submitFieldObservation,
@@ -194,7 +195,7 @@ describe("Displacement encounter", () => {
   it("waits for Displacement when everyone finishes Exchange first", () => {
     const initial = setup();
 
-    let state = { ...initial, stage: "exchange" as const };
+    let state: FieldState = { ...initial, stage: "exchange" };
 
     for (const player of players) {
       const object = fieldView(state, objects, players, player.id).target!;
@@ -248,7 +249,7 @@ describe("Displacement encounter", () => {
 
   it("advances when the final Exchange observation arrives after Displacement", () => {
     const initial = setup();
-    let state = { ...initial, stage: "exchange" as const };
+    let state: FieldState = { ...initial, stage: "exchange" };
 
     const encounter = state.displacement!;
 

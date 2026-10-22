@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ArchitectDecisionService } from "../src/architect/architectDecisionService.js";
-import type { AiProvider } from "../src/architect/aiProvider.js";
+import type {
+  AiProvider,
+  AiGenerationRequest,
+  AiGenerationResponse,
+} from "../src/architect/aiProvider.js";
 
 const mocks = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
@@ -36,7 +40,11 @@ describe("ArchitectDecisionService", () => {
     proposedEffects: [],
   };
 
-  let generate: ReturnType<typeof vi.fn>;
+  let generate: ReturnType<
+    typeof vi.fn<
+      (request: AiGenerationRequest) => Promise<AiGenerationResponse>
+    >
+  >;
   let service: ArchitectDecisionService;
 
   beforeEach(() => {
@@ -59,7 +67,9 @@ describe("ArchitectDecisionService", () => {
       ],
     });
 
-    generate = vi.fn().mockResolvedValue({
+    generate = vi.fn<
+      (request: AiGenerationRequest) => Promise<AiGenerationResponse>
+    >().mockResolvedValue({
       text: JSON.stringify(validDecision),
       provider: "ollama",
       model: "gemma3:4b",

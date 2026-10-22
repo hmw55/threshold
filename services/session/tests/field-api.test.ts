@@ -141,12 +141,38 @@ describe("field encounter API",()=>{
     }
     expect(solved).toBe(true);
 
-    await request(app).post(`/sessions/${code}/threshold/field/verdict`).set("x-device-id","tv-1").send({choice:"release"}).expect(200);
-    const voted = await request(app).post(`/sessions/${code}/field/verdict`).set(headers)
-      .send({choice:"release"}).expect(200);
+    // The Fire TV records its legacy terminal decision.
+    // The Lens makes the final Witness identity accusation.
+    await request(app)
+      .post(`/sessions/${code}/threshold/field/verdict`)
+      .set("x-device-id", "tv-1")
+      .send({ choice: "release" })
+      .expect(200);
+
+    const witnessCase = currentView.witnessCase;
+    expect(witnessCase).toBeTruthy();
+
+    const witnessChoice = witnessCase.suspects.find(
+      (candidate: { id: string }) =>
+        candidate.id === "architect" || candidate.id === "unknown",
+    );
+
+    expect(witnessChoice).toBeDefined();
+
+    const voted = await request(app)
+      .post(`/sessions/${code}/field/verdict`)
+      .set(headers)
+      .send({ choice: witnessChoice!.id })
+      .expect(200);
+
     expect(voted.body.view.stage).toBe("complete");
-    expect(voted.body.view.ending).toBe("release");
-    await request(app).post(`/sessions/${code}/field/verdict`).set(headers).send({choice:"erase"}).expect(409);
+    expect(["release", "preserve"]).toContain(voted.body.view.ending);
+
+    await request(app)
+      .post(`/sessions/${code}/field/verdict`)
+      .set(headers)
+      .send({ choice: "erase" })
+      .expect(409);
     const tv = await request(app).get(`/sessions/${code}/threshold/game`).set("x-device-id","tv-1").expect(200);
     expect(tv.body.fieldEncounter.stage).toBe("complete");
     expect(tv.body.terminalChallenge).toBeNull();

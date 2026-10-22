@@ -507,134 +507,20 @@
   }
 }
 
-/* Last Witness — mobile forensic accusation interface */
-.field-accusation {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-  padding: 20px 16px;
-  overflow-wrap: anywhere;
-}
-
-.field-accusation > strong {
-  display: block;
-  font-size: 0.7rem;
-  letter-spacing: 0.13em;
-  line-height: 1.5;
-  color: #85d9e7;
-}
-
-.field-accusation > h2 {
-  margin: 0;
-  font-size: clamp(1.3rem, 5vw, 1.8rem);
-  line-height: 1.2;
-  letter-spacing: 0.025em;
-}
-
-.field-accusation > h3 {
-  margin: 12px 0 0;
-  font-size: 0.82rem;
-  line-height: 1.4;
-  letter-spacing: 0.09em;
-  color: #9ed8e2;
-}
-
-.field-accusation > p {
-  margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.55;
-  color: #c2d0d6;
-}
-
-.field-accusation .field-evidence-list,
-.field-accusation .field-suspect-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  width: 100%;
-}
-
-.field-accusation .field-evidence-card,
-.field-accusation .field-suspect-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-  margin: 0;
-  padding: 14px;
-  border: 1px solid rgba(132, 188, 201, 0.28);
-  border-radius: 10px;
-  background: rgba(5, 19, 29, 0.72);
-  cursor: pointer;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.field-accusation .field-evidence-card > input,
-.field-accusation .field-suspect-card > input {
-  flex: 0 0 19px;
-  width: 19px;
-  height: 19px;
-  margin: 2px 0 0;
-  accent-color: #7edce9;
-}
-
-.field-accusation .field-evidence-card > span {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.field-accusation .field-evidence-card strong {
-  display: block;
-  color: #89dce8;
-  font-size: 0.7rem;
-  letter-spacing: 0.12em;
-  line-height: 1.4;
-}
-
-.field-accusation .field-evidence-card span span {
-  display: block;
-  color: #e1e9ed;
-  font-size: 0.9rem;
-  line-height: 1.55;
-}
-
-.field-accusation .field-suspect-card {
-  align-items: center;
-  font-weight: 600;
-  color: #e1e9ed;
-}
-
-.field-accusation .field-evidence-card:has(input:checked),
-.field-accusation .field-suspect-card:has(input:checked) {
-  border-color: #7edce9;
-  background: rgba(29, 91, 106, 0.32);
-}
-
-.field-accusation > button {
-  width: 100%;
-  min-height: 52px;
-  margin-top: 8px;
-  padding: 12px 16px;
-  font-size: 0.85rem;
-  font-weight: 800;
-  letter-spacing: 0.07em;
-  white-space: normal;
-}
-
-@media (max-width: 480px) {
-  .field-accusation {
-    padding: 18px 12px;
-  }
-
-  .field-accusation .field-evidence-card,
-  .field-accusation .field-suspect-card {
-    padding: 13px 11px;
-  }
-}
+/* Focused Lens: one dominant action, supporting material on demand. */
+.field-panel { max-width: 720px; margin-inline: auto; }
+.field-act-label { color: #9db4c0; font-size: 11px; letter-spacing: 1.6px; font-weight: 800; margin: 6px 0 18px; }
+.field-active-task { margin: 18px 0; padding: 20px 18px; background: #142832; border: 1px solid #4d8995; border-radius: 10px; }
+.field-active-task > span, .field-task-kicker { display: block; font-size: 11px; letter-spacing: 1.6px; font-weight: 800; color: #8ae3ec; }
+.field-active-task p { font-size: 18px; font-weight: 600; line-height: 1.55; margin: 12px 0; }
+.field-active-task strong { color: #f2d2a6; font-size: 13px; }
+.field-case-file, .field-verdict-recap, .field-optional { margin: 14px 0; padding: 14px; background: #111c25; border: 1px solid #304957; border-radius: 8px; }
+.field-case-file > summary, .field-verdict-recap > summary, .field-optional > summary { cursor: pointer; color: #a9cdd6; font-size: 12px; letter-spacing: .7px; font-weight: 800; }
+.field-case-body { padding-top: 12px; line-height: 1.65; }
+.field-verdict-recap > div { max-height: 260px; overflow-y: auto; margin-top: 10px; }
+.field-verdict-recap p { font-size: 13px; border-top: 1px solid #304957; padding-top: 10px; }
+.field-optional label { display: block; margin: 14px 0 6px; }
+.field-panel button:focus-visible, .field-panel summary:focus-visible { outline: 2px solid #8ae3ec; outline-offset: 3px; }
+.field-displacement .field-active-task { margin: 4px 0 12px; }
+.field-accusation .field-task-kicker { margin-bottom: 4px; }
+@media (max-width: 480px) { .field-active-task { padding: 16px 14px; } .field-active-task p { font-size: 17px; } }

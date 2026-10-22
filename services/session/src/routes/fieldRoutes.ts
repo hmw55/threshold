@@ -5,6 +5,7 @@ import type { FieldChoice, FieldAction } from "../game/fieldExpedition.js";
 import {
   advanceFieldAfterDisplacement,
   initializeFieldDisplacement,
+  initializeWitnessIdentity,
   submitDisplacementAction,
   resolveDisplacementInvestigation,
   type FieldRecord,
@@ -893,7 +894,7 @@ app.get("/sessions/:code/field", (request, response) => {
   const field = ensureField(ctx.game);
 
   const updated = initializeFieldDisplacement(
-    field,
+    initializeWitnessIdentity(field, ctx.objects, session.players),
     ctx.objects,
     session.players,
   );
@@ -1440,6 +1441,7 @@ app.post("/sessions/:code/field/puzzle", (request, response) => {
   try {
     const result = answerFieldPuzzle(ensureField(ctx.game), playerId!, request.body?.choiceId, request.body?.evidenceIds);
     ctx.game.field = result.state;
+    ctx.game.timelinePhase = timelinePhaseForFieldStage(result.state.stage);
     if (result.correct) {
       const player = ctx.game.players?.find(entry => entry.playerId === playerId);
       if (player) player.score += 250;

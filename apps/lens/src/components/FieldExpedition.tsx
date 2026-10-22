@@ -40,6 +40,8 @@ interface FieldView {
   objects: FieldObject[]; prior: {playerId: string; stage: string; player: string; object: string; observation: string}[];
   ending: string | null; votes: number; hasVoted: boolean; playerCount: number; elapsedSeconds: number;
   displacement: DisplacementView | null;
+  caseEvidence: {fragments:string[];label:string} | null;
+  witnessCase: { incident: string; anchorName: string; anchorLocation: string; suspects: {id:string;label:string}[]; isWitness:boolean; votes:number; resolvedIdentity:string|null } | null;
 }
 
 interface Props { sessionCode: string; playerId: string; playerToken: string }
@@ -47,7 +49,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [view, setView] = useState<FieldView | null>(null);
   const [objectId, setObjectId] = useState("");
   const [observation, setObservation] = useState("");
-  const [choice, setChoice] = useState("preserve");
+  const [choice, setChoice] = useState("");
   const [action, setAction] = useState<FieldAction>("observe");
   const [detail, setDetail] = useState("");
   const [exposeTarget, setExposeTarget] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [feedback, setFeedback] = useState("");
   const [accusedSuspect, setAccusedSuspect] = useState("");
   const [accusationEvidence, setAccusationEvidence] = useState<string[]>([]);
+  const [showOptionalDetail, setShowOptionalDetail] = useState(false);
 
   const [displacementObjectId, setDisplacementObjectId] = useState("");
   const [displacementObservation, setDisplacementObservation] = useState("");
@@ -82,7 +85,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         if (!active) return;
         if (stageRef.current !== null && stageRef.current !== next.stage) {
           setObservation(""); setObjectId("");
-          setFeedback(""); setError("");
+          setFeedback(""); setError(""); setShowOptionalDetail(false);
         }
         stageRef.current = next.stage;
         const displacementPhase = next.stage === "exchange" && next.displacement
@@ -298,8 +301,10 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     <div className="field-eyebrow">THE LAST WITNESS // {view.role}</div>
     <div className="field-meter"><div style={{width: `${100 * view.progress / view.total}%`}} /></div>
     <h1>{view.title}</h1>
+    <div className="field-act-label">{view.stage === "survey" ? "01 // DISCOVER" : view.stage === "signal" ? "02 // INVESTIGATE" : view.stage === "exchange" ? "03 // THE ANOMALY" : view.stage === "fracture" ? "04 // RECONSTRUCT" : view.stage === "verdict" ? "05 // DECIDE" : "TRANSMISSION ENDED"}</div>
     <blockquote className="field-transmission">{view.transmission}</blockquote>
-    {view.privateInstruction && (
+    {view.witnessCase && <details className="field-case-file"><summary>CASE FILE // {view.witnessCase.anchorName.toUpperCase()}</summary><div className="field-case-body"><p>{view.witnessCase.incident}</p><p>LOCATION // {view.witnessCase.anchorLocation}</p>{view.witnessCase.isWitness && <p className="field-private">CLASSIFIED // YOU ARE THE LAST WITNESS. You know what you experienced, not the entire cause. Decide what to share.</p>}</div></details>}
+    {view.privateInstruction && view.stage !== "complete" && (
       <details className="field-private field-directive">
         <summary>
           <span>PRIVATE DIRECTIVE // {view.role.toUpperCase()}</span>
@@ -325,8 +330,8 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
       </pre>
       <p>END OF TRANSMISSION</p>
     </div> : <>
-      {view.stage !== "fracture" && view.stage !== "verdict" && <p className="field-prompt">{view.prompt}</p>}
-      {view.stage !== "fracture" && view.stage !== "verdict" && view.target && <p className="field-target">REQUIRED INVESTIGATION // {view.target.name} · {view.target.location}</p>}
+      {["survey", "signal"].includes(view.stage) && !view.submitted && <div className="field-active-task"><span>YOUR NEXT ACTION</span><p>{view.prompt}</p>{view.target && <strong>{view.target.name} · {view.target.location}</strong>}</div>}
+      {view.stage === "exchange" && !view.displacement && !view.submitted && <div className="field-active-task"><span>YOUR NEXT ACTION</span><p>{view.prompt}</p>{view.target && <strong>{view.target.name} · {view.target.location}</strong>}</div>}
       {view.stage === "exchange" && view.displacement && (
         <section className="field-controls field-displacement">
           <div className="field-eyebrow">
@@ -343,7 +348,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
                   : "AN ENVIRONMENTAL ANOMALY"}
           </h2>
 
-          <p>{view.displacement.instruction}</p>
+                     <div className="field-active-task"><span>YOUR NEXT ACTION</span><p>{view.displacement.instruction}</p>{view.displacement.role === "actor" && view.displacement.objectId && <strong>Assigned object: {view.objects.find(object => object.id === view.displacement?.objectId)?.name ?? "Confirmed object"}</strong>}</div>
 
           {view.displacement.role === "actor" &&
             view.displacement.phase === "awaiting_action" && (
@@ -459,19 +464,16 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           )}
         </section>
       )}
+      {view.stage === "fracture" && view.caseEvidence && <details className="field-case-file"><summary>RECOVERED FRAGMENTS // {view.caseEvidence.fragments.length}</summary><div className="field-case-body"><strong>{view.caseEvidence.label}</strong>{view.caseEvidence.fragments.map((fragment, index) => <p key={index}>{fragment}</p>)}</div></details>}
       {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
         <div className="field-puzzle field-accusation">
-          <blockquote className="field-transmission" aria-label="Architect evidence challenge">
-            <strong>ARCHITECT // EVIDENCE CHALLENGE</strong>
-            <p>{view.prompt}</p>
-          </blockquote>
-          <strong>FORENSIC ANALYSIS // CONSTRUCT YOUR ACCUSATION</strong>
-          <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
-          <p>{view.mystery?.objective ?? "Determine what the evidence establishes."}</p>
+                     <span className="field-task-kicker">YOUR NEXT ACTION // RECONSTRUCT</span>
+           <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
+           <p>{view.puzzle.prompt}</p>
 
-          <h3>01 // VERIFIED EVIDENCE</h3>
-          <p>Choose the records that support your accusation.</p>
-          <div className="field-evidence-list">
+                     {view.witnessCase ? <p>Compare the actions below with what actually happened in your room. Your selection will cite the corresponding recorded action.</p> : <><h3>01 // YOUR ROOM RECORDS</h3>
+           <p>Select the evidence that supports your deduction.</p>
+           <div className="field-evidence-list">
             {view.mystery?.clues.map((clue, index) => (
               <label className="field-evidence-card" key={clue.id}>
                 <input
@@ -490,9 +492,9 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
                 </span>
               </label>
             ))}
-          </div>
+                     </div></>}
 
-          <h3>02 // RESPONSIBLE PARTY</h3>
+           <h3>WHICH ACTION MATCHES?</h3>
           <div className="field-suspect-list">
             {view.puzzle.choices.map(item => (
               <label className="field-suspect-card" key={item.id}>
@@ -501,7 +503,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
                   name="field-accused-suspect"
                   checked={accusedSuspect === item.id}
                   disabled={busy}
-                  onChange={() => setAccusedSuspect(item.id)}
+                                     onChange={() => { setAccusedSuspect(item.id); setAccusationEvidence(view.witnessCase ? [item.id] : []); }}
                 />
                 <span>{item.label}</span>
               </label>
@@ -513,7 +515,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
             disabled={busy || !accusedSuspect || accusationEvidence.length === 0}
             onClick={() => void answerPuzzle(accusedSuspect, accusationEvidence)}
           >
-            {busy ? "TRANSMITTING..." : "TRANSMIT ACCUSATION"}
+            {busy ? "TRANSMITTING..." : "SUBMIT RECONSTRUCTION"}
           </button>
         </div>
       )}
@@ -526,7 +528,14 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           <button disabled={busy || newObject.trim().length < 2 || newLocation.trim().length < 2} onClick={() => void registerObject()}>CONFIRM REAL OBJECT</button>
         </div>
       </details>}
-      {view.stage === "verdict" ? <div className="field-controls">
+      {view.stage === "verdict" && view.witnessCase ? <div className="field-controls">
+        <strong>FINAL BALLOT // WHO WAS THE LAST WITNESS?</strong>
+                 <p>Who experienced the incident? Identity is not the same as responsibility.</p>
+         <details className="field-verdict-recap"><summary>REVIEW WHAT HAPPENED ({view.prior.length} RECORDS)</summary><div>{view.prior.map((record, index) => <p key={`${record.stage}-${index}`}><strong>{record.player} // {record.object}</strong> — {record.observation}</p>)}</div></details>
+        {view.witnessCase.suspects.map(suspect => <label key={suspect.id}><input type="radio" name="witness-ballot" value={suspect.id} checked={choice === suspect.id} disabled={busy || voted} onChange={() => setChoice(suspect.id)} /> {suspect.label}</label>)}
+        <button disabled={busy || voted || !choice} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "CAST WITNESS BALLOT"}</button>
+        <p>{view.votes} / {view.required} votes received</p>
+      </div> : view.stage === "verdict" ? <div className="field-controls">
         <p>Choose what happens to the evidence collected here.</p>
         <label><input type="radio" name="verdict" value="preserve" checked={choice === "preserve"} onChange={() => setChoice("preserve")}/> Preserve the record</label>
         <label><input type="radio" name="verdict" value="release" checked={choice === "release"} onChange={() => setChoice("release")}/> Release the truth to the witnesses</label>
@@ -534,8 +543,8 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
       </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal", "exchange"].includes(view.stage) ? (
-        view.stage === "exchange" && view.displacement && view.displacement.phase !== "resolved"
-          ? <p className="field-prompt" role="status">Complete the Displacement encounter before continuing the shared investigation.</p>
+                 view.stage === "exchange" && view.displacement && view.displacement.phase !== "resolved"
+           ? null
           : 
         view.submitted
           ? <div className="field-controls" role="status">
@@ -556,8 +565,8 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
         <small>Never move fragile, hot, sharp, heavy, private, or unsafe objects. Use the safe alternative when unsure.</small>
         <label htmlFor="field-observation">WHAT DID YOU ACTUALLY SEE OR CHANGE?</label>
         <textarea id="field-observation" rows={5} maxLength={1200} value={observation} onChange={e => setObservation(e.target.value)} placeholder="What did you actually observe or do? What changed, or what did you discover?" />
-          <label htmlFor="field-detail">CLOSE-UP DETAIL (YEAR, MODEL, MARKING, OR OTHER LEGIBLE FACT)</label>
-          <input id="field-detail" value={detail} maxLength={240} onChange={e => setDetail(e.target.value)} placeholder="Only enter a detail you can read or verify." />
+                   <details open={showOptionalDetail} onToggle={e => setShowOptionalDetail(e.currentTarget.open)} className="field-optional"><summary>Add a verified detail (optional)</summary><label htmlFor="field-detail">VISIBLE MARKING OR DETAIL</label>
+           <input id="field-detail" value={detail} maxLength={240} onChange={e => setDetail(e.target.value)} placeholder="Only enter something you can verify." /></details>
           <FieldEvidenceCamera
             key={`observation-${view.stage}-${view.target?.id ?? "none"}`}
             label="CLOSE-UP EVIDENCE"
@@ -565,14 +574,14 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
             onCapture={setCaptured}
           />
           <button disabled={busy || observation.trim().length < 12 || !view.objects.length || (["examine", "move", "rotate", "reposition"].includes(action) && !captured)} onClick={() => void submit()}>{busy ? "TRANSMITTING..." : "SUBMIT VERIFIED REPORT"}</button>
-          <small>Photos support the report. The Architect accepts only legible, grounded evidence and may ask you to retry.</small>
+                     <small>Describe only what you actually saw or did. Never move unsafe objects.</small>
         </>}
       </div>
       ) : null}
     </>}
     {error && <p className="field-error" role="alert">{error}</p>}
     {feedback && <p className="field-feedback" role="status">{feedback}</p>}
-    {view.prior.length > 0 && <details className="field-log"><summary>RECENT WITNESS RECORDS ({view.prior.length})</summary>
+         {view.prior.length > 0 && view.stage !== "complete" && <details className="field-log"><summary>CASE JOURNAL // {view.prior.length} RECORDS</summary>
       {view.prior.map((r,i) => <div key={`${r.stage}-${i}`}><strong>{r.player} // {r.object}</strong><p>{r.observation}</p>{r.playerId !== playerId && <button type="button" onClick={() => { setExposeTarget(r.playerId); void expose(r.playerId); }}>EXPOSE INCONSISTENCY</button>}</div>)}
     </details>}
   </section>;
