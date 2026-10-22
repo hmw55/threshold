@@ -141,28 +141,18 @@ describe("field encounter API",()=>{
     }
     expect(solved).toBe(true);
 
-    // The Fire TV records its legacy terminal decision.
-    // The Lens makes the final Witness identity accusation.
+    // The public Threshold participates in the final decision.
     await request(app)
       .post(`/sessions/${code}/threshold/field/verdict`)
       .set("x-device-id", "tv-1")
       .send({ choice: "release" })
       .expect(200);
 
-    const witnessCase = currentView.witnessCase;
-    expect(witnessCase).toBeTruthy();
-
-    const witnessChoice = witnessCase.suspects.find(
-      (candidate: { id: string }) =>
-        candidate.id === "architect" || candidate.id === "unknown",
-    );
-
-    expect(witnessChoice).toBeDefined();
-
+    // The Lens submits an actual ending choice, not a witness identity.
     const voted = await request(app)
       .post(`/sessions/${code}/field/verdict`)
       .set(headers)
-      .send({ choice: witnessChoice!.id })
+      .send({ choice: "release" })
       .expect(200);
 
     expect(voted.body.view.stage).toBe("complete");

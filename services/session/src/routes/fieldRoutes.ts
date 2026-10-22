@@ -6,6 +6,8 @@ import {
   advanceFieldAfterDisplacement,
   initializeFieldDisplacement,
   initializeWitnessIdentity,
+  initializeCooperation,
+  submitCooperation,
   submitDisplacementAction,
   resolveDisplacementInvestigation,
   type FieldRecord,
@@ -894,7 +896,7 @@ app.get("/sessions/:code/field", (request, response) => {
   const field = ensureField(ctx.game);
 
   const updated = initializeFieldDisplacement(
-    initializeWitnessIdentity(field, ctx.objects, session.players),
+    initializeCooperation(initializeWitnessIdentity(field, ctx.objects, session.players), ctx.objects, session.players),
     ctx.objects,
     session.players,
   );
@@ -1324,6 +1326,26 @@ app.post(
     }
   },
 );
+
+/** Cooperative cipher: private Lens fragments must be communicated between players. */
+app.post("/sessions/:code/field/cooperation", (request,response)=>{
+  const session=getSession(request.params.code);
+  if(!session){response.status(404).json({error:"session_not_found"});return;}
+  const playerId=request.header("x-player-id");
+  const token=request.header("authorization")?.replace(/^Bearer\s+/i,"");
+  if(!authenticateExpeditionPlayer(session,playerId,token)){response.status(401).json({error:"invalid_player_credentials"});return;}
+  const ctx=fieldContext(session.code);
+  if(!ctx){response.status(409).json({error:"environment_not_ready"});return;}
+  if(typeof request.body?.answer!=="string"||request.body.answer.length>32){response.status(400).json({error:"invalid_answer"});return;}
+  try{
+    const result=submitCooperation(ensureField(ctx.game),playerId!,request.body.answer,session.players);
+    ctx.game.field=result.state;
+    ctx.game.timelinePhase=timelinePhaseForFieldStage(result.state.stage);
+    if(result.correct){const player=ctx.game.players?.find(p=>p.playerId===playerId);if(player)player.score+=350;}
+    saveGameState(ctx.game);
+    response.json({correct:result.correct,message:result.message,view:fieldView(result.state,ctx.objects,session.players,playerId??null)});
+  }catch(error){response.status(409).json({error:error instanceof Error?error.message:"cooperation_failed"});}
+});
 
 app.post("/sessions/:code/field/observation", evidenceImageUpload, async (request, response) => {
   const code = request.params.code;

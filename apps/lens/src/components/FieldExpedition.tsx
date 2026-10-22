@@ -41,6 +41,7 @@ interface FieldView {
   ending: string | null; votes: number; hasVoted: boolean; playerCount: number; elapsedSeconds: number;
   displacement: DisplacementView | null;
   caseEvidence: {fragments:string[];label:string} | null;
+  cooperation: {active:boolean;solved:boolean;anchorName:string;fragment:string|null;order:string[];solvedBy:string|null;attempts:number}|null;
   witnessCase: { incident: string; anchorName: string; anchorLocation: string; suspects: {id:string;label:string}[]; isWitness:boolean; votes:number; resolvedIdentity:string|null } | null;
 }
 
@@ -62,6 +63,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
   const [accusedSuspect, setAccusedSuspect] = useState("");
   const [accusationEvidence, setAccusationEvidence] = useState<string[]>([]);
   const [showOptionalDetail, setShowOptionalDetail] = useState(false);
+  const [sharedCipher, setSharedCipher] = useState("");
 
   const [displacementObjectId, setDisplacementObjectId] = useState("");
   const [displacementObservation, setDisplacementObservation] = useState("");
@@ -246,6 +248,19 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     }
   }
 
+  async function submitSharedCipher() {
+    if(busyRef.current||!sharedCipher.trim())return;
+    busyRef.current=true;setBusy(true);setError("");
+    try {
+      const result=await request<{correct:boolean;message:string;view:FieldView}>(`${base}/cooperation`,{
+        method:"POST",headers:{...headers,"Content-Type":"application/json"},body:JSON.stringify({answer:sharedCipher.trim()})
+      });
+      setView(result.view);setFeedback(result.message);
+      if(result.correct)setSharedCipher("");
+    }catch(e){setError(e instanceof Error?e.message:"SIGNAL RECONSTRUCTION FAILED");}
+    finally{busyRef.current=false;setBusy(false);}
+  }
+
   async function answerAllegiance(accepted: boolean) {
     try { const result = await request<{view: FieldView}>(`${base}/allegiance`, {method: "POST", headers: {...headers, "Content-Type": "application/json"}, body: JSON.stringify({accepted})}); setView(result.view); }
     catch (e) { setError(e instanceof Error ? e.message : "PRIVATE DIRECTIVE UNAVAILABLE"); }
@@ -303,7 +318,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
     <h1>{view.title}</h1>
     <div className="field-act-label">{view.stage === "survey" ? "01 // DISCOVER" : view.stage === "signal" ? "02 // INVESTIGATE" : view.stage === "exchange" ? "03 // THE ANOMALY" : view.stage === "fracture" ? "04 // RECONSTRUCT" : view.stage === "verdict" ? "05 // DECIDE" : "TRANSMISSION ENDED"}</div>
     <blockquote className="field-transmission">{view.transmission}</blockquote>
-    {view.witnessCase && <details className="field-case-file"><summary>CASE FILE // {view.witnessCase.anchorName.toUpperCase()}</summary><div className="field-case-body"><p>{view.witnessCase.incident}</p><p>LOCATION // {view.witnessCase.anchorLocation}</p>{view.witnessCase.isWitness && <p className="field-private">CLASSIFIED // YOU ARE THE LAST WITNESS. You know what you experienced, not the entire cause. Decide what to share.</p>}</div></details>}
+    {view.witnessCase && <details className="field-case-file"><summary>FICTIONAL INCIDENT // {view.witnessCase.anchorName.toUpperCase()}</summary><div className="field-case-body"><p>{view.witnessCase.incident}</p><p>LOCATION // {view.witnessCase.anchorLocation}</p><p>The incident is fiction. Your physical reports are testimony, not automatically verified fact.</p></div></details>}
     {view.privateInstruction && view.stage !== "complete" && (
       <details className="field-private field-directive">
         <summary>
@@ -331,7 +346,19 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
       <p>END OF TRANSMISSION</p>
     </div> : <>
       {["survey", "signal"].includes(view.stage) && !view.submitted && <div className="field-active-task"><span>YOUR NEXT ACTION</span><p>{view.prompt}</p>{view.target && <strong>{view.target.name} · {view.target.location}</strong>}</div>}
-      {view.stage === "exchange" && !view.displacement && !view.submitted && <div className="field-active-task"><span>YOUR NEXT ACTION</span><p>{view.prompt}</p>{view.target && <strong>{view.target.name} · {view.target.location}</strong>}</div>}
+
+      {view.stage === "signal" && view.cooperation && <section className="field-controls field-cooperation" aria-label="Cooperative signal challenge">
+        <span className="field-task-kicker">COOPERATIVE ENCOUNTER // SHARED SIGNAL</span>
+        <h2>NO ONE LENS HAS THE WHOLE CODE</h2>
+        <p>Inspect the real room anchor <strong>{view.cooperation.anchorName}</strong>. Each witness holds one private character. Speak to one another, share your characters, and enter them in the player order shown below. Your device never reveals another player's character.</p>
+        <div className="field-cipher-fragment"><small>YOUR PRIVATE FRAGMENT</small><strong>{view.cooperation.fragment ?? "—"}</strong></div>
+        <p>ORDER // {view.cooperation.order.join(" → ")}</p>
+        {view.cooperation.solved ? <p role="status">SIGNAL RESTORED. {view.submitted ? "ADVANCING TO THE ANOMALY..." : "COMPLETE YOUR PHYSICAL REPORT TO CONTINUE."}</p> : <>
+          <label htmlFor="shared-cipher">COMBINED WITNESS CODE</label>
+          <input id="shared-cipher" value={sharedCipher} maxLength={32} autoComplete="off" onChange={e=>setSharedCipher(e.target.value.toUpperCase())} placeholder="ENTER THE SHARED CODE" />
+          <button type="button" disabled={busy||!sharedCipher.trim()} onClick={()=>void submitSharedCipher()}>RECONSTRUCT SHARED SIGNAL</button>
+        </>}
+      </section>}
       {view.stage === "exchange" && view.displacement && (
         <section className="field-controls field-displacement">
           <div className="field-eyebrow">
@@ -468,7 +495,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
       {view.stage === "fracture" && view.puzzle && view.puzzle.solvedBy.length === 0 && (
         <div className="field-puzzle field-accusation">
                      <span className="field-task-kicker">YOUR NEXT ACTION // RECONSTRUCT</span>
-           <h2>{view.mystery?.title ?? "RECOVERED CASE FILE"}</h2>
+           <h2>WHAT DOES THE ROOM ACTUALLY PROVE?</h2>
            <p>{view.puzzle.prompt}</p>
 
                      {view.witnessCase ? <p>Compare the actions below with what actually happened in your room. Your selection will cite the corresponding recorded action.</p> : <><h3>01 // YOUR ROOM RECORDS</h3>
@@ -494,7 +521,7 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
             ))}
                      </div></>}
 
-           <h3>WHICH ACTION MATCHES?</h3>
+           <h3>WHICH RECORD SUPPORTS THE CLAIM?</h3>
           <div className="field-suspect-list">
             {view.puzzle.choices.map(item => (
               <label className="field-suspect-card" key={item.id}>
@@ -528,21 +555,15 @@ export function FieldExpedition({sessionCode, playerId, playerToken}: Props) {
           <button disabled={busy || newObject.trim().length < 2 || newLocation.trim().length < 2} onClick={() => void registerObject()}>CONFIRM REAL OBJECT</button>
         </div>
       </details>}
-      {view.stage === "verdict" && view.witnessCase ? <div className="field-controls">
-        <strong>FINAL BALLOT // WHO WAS THE LAST WITNESS?</strong>
-                 <p>Who experienced the incident? Identity is not the same as responsibility.</p>
-         <details className="field-verdict-recap"><summary>REVIEW WHAT HAPPENED ({view.prior.length} RECORDS)</summary><div>{view.prior.map((record, index) => <p key={`${record.stage}-${index}`}><strong>{record.player} // {record.object}</strong> — {record.observation}</p>)}</div></details>
-        {view.witnessCase.suspects.map(suspect => <label key={suspect.id}><input type="radio" name="witness-ballot" value={suspect.id} checked={choice === suspect.id} disabled={busy || voted} onChange={() => setChoice(suspect.id)} /> {suspect.label}</label>)}
-        <button disabled={busy || voted || !choice} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "CAST WITNESS BALLOT"}</button>
-        <p>{view.votes} / {view.required} votes received</p>
-      </div> : view.stage === "verdict" ? <div className="field-controls">
-        <p>Choose what happens to the evidence collected here.</p>
-        <label><input type="radio" name="verdict" value="preserve" checked={choice === "preserve"} onChange={() => setChoice("preserve")}/> Preserve the record</label>
-        <label><input type="radio" name="verdict" value="release" checked={choice === "release"} onChange={() => setChoice("release")}/> Release the truth to the witnesses</label>
-        <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} onChange={() => setChoice("erase")}/> Erase the Architect's copy</label>
-        <button disabled={busy || voted} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT DECISION"}</button>
+      {view.stage === "verdict" ? <div className="field-controls field-final-vote">
+        <strong>FINAL TRANSMISSION // WHAT MAY THE ARCHITECT KEEP?</strong>
+        <p>You have tested its account against real evidence. Your decision matters; if the vote splits, earlier refusals and exposed deception decide the tie. The ending will explain the rule.</p>
+        <label><input type="radio" name="verdict" value="preserve" checked={choice === "preserve"} disabled={busy||voted} onChange={() => setChoice("preserve")}/> Preserve the record, with uncertainty attached</label>
+        <label><input type="radio" name="verdict" value="release" checked={choice === "release"} disabled={busy||voted} onChange={() => setChoice("release")}/> Release the account to the witnesses</label>
+        <label><input type="radio" name="verdict" value="erase" checked={choice === "erase"} disabled={busy||voted} onChange={() => setChoice("erase")}/> Erase the Architect's narrative copy</label>
+        <button disabled={busy||voted||!choice} onClick={() => void vote()}>{busy ? "TRANSMITTING..." : voted ? "VOTE RECEIVED" : "TRANSMIT FINAL DECISION"}</button>
         <p>{view.votes} / {view.required} decisions received</p>
-      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal", "exchange"].includes(view.stage) ? (
+      </div> : view.stage === "fracture" ? (view.puzzle ? null : <p className="field-prompt">AWAITING VERIFIED CASE EVIDENCE...</p>) : ["survey", "signal"].includes(view.stage) ? (
                  view.stage === "exchange" && view.displacement && view.displacement.phase !== "resolved"
            ? null
           : 

@@ -524,3 +524,11 @@
 .field-displacement .field-active-task { margin: 4px 0 12px; }
 .field-accusation .field-task-kicker { margin-bottom: 4px; }
 @media (max-width: 480px) { .field-active-task { padding: 16px 14px; } .field-active-task p { font-size: 17px; } }
+
+/* The cooperative task is a primary, readable interaction, not another log. */
+.field-cooperation { border: 1px solid var(--field-accent, #92b7a3); padding: 1.25rem; margin-block: 1rem; border-radius: 12px; }
+.field-cipher-fragment { display: flex; flex-direction: column; gap: .35rem; padding: 1rem; margin: 1rem 0; border: 1px dashed currentColor; border-radius: 10px; max-width: 13rem; }
+.field-cipher-fragment strong { font-size: 2.5rem; letter-spacing: .2em; }
+.field-cooperation input { width: 100%; max-width: 20rem; text-transform: uppercase; letter-spacing: .12em; }
+.field-final-vote label { display: flex; align-items: flex-start; gap: .7rem; padding: .7rem; }
+.field-final-vote input[type="radio"] { flex: 0 0 auto; }
