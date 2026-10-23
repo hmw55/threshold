@@ -9,6 +9,12 @@ Threshold's television client is a **native Android/Kotlin application** (`com.t
 - `compileSdk 35`, `targetSdk 35`, **`minSdk 25`** (the earlier `minSdk 28` documentation is outdated).
 - Physical Fire TV with developer options and ADB debugging enabled; Fire OS 6 installation/launch and Fire OS 7 development were tested, but full compatibility across all models is not guaranteed.
 
+## Recommended interactive deployment
+
+From the repository root, use `pnpm dev:demo` for the full backend/Lens/optional Cloudflare HTTPS setup plus selected-TV deployment. Use `pnpm fire-tv:demo` to select and redeploy one or more Fire TVs without starting the Lens or Cloudflare. The wizard stores device aliases in the ignored `scripts/fire-tv-devices.local.json`, builds the APK once, and installs/launches it on the selected TVs.
+
+The wizard asks for a **TV-reachable backend address**, which may differ from the temporary HTTPS Cloudflare URL used to open Lens on phones. Both must lead to the **same session backend**. On WSL2, a Windows LAN IP alone may not make WSL port 3001 reachable; check Windows firewall/forwarding or mirrored networking. Use the manual steps below for troubleshooting.
+
 ## Build a debug APK
 
 ```bash

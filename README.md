@@ -123,47 +123,51 @@ The Lens and backend are **separate services**: a working backend URL does not a
 
 [Full system architecture](docs/architecture.md) · [Editable AWS diagram](docs/diagrams/threshold-aws-architecture.mmd) · [Session lifecycle](docs/session-lifecycle.md)
 
-## Quick start for contributors
+## Quick start: interactive demo (recommended)
 
-**Requirements:** Node.js **22+**, pnpm **10.18.0** (via Corepack), a Linux shell (WSL or Arch Linux recommended). Fire TV development additionally requires a supported JDK, Android SDK, ADB, and an Android-compatible Fire TV device. See the [complete development environment guide](dev-notes/development-environment.md) before configuring physical hardware or remote access.
+Run a local, multi-device expedition with an HTTPS phone Lens using the demo wizard. This is the recommended way to try **The Last Witness** on physical Fire TV hardware.
+
+**Prerequisites:** Node.js 22+, pnpm 10.18.0, Java 21, Android SDK/ADB for TV deployment, and [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) for an HTTPS phone URL. Enable ADB debugging on each Fire TV. For AI-assisted play, run Ollama locally or configure a Gemini API key.
 
 ```bash
-# Clone the repository and enter its root
 git clone https://github.com/hmw55/threshold.git
 cd threshold
-
 corepack enable
 pnpm install --frozen-lockfile
-
-# Terminal 1: session service, preserving existing local SQLite data
-pnpm dev:resume
-
-# Terminal 2: Lens development server
-pnpm --filter lens dev --host 0.0.0.0
-
-# Terminal 3: build the native Fire TV APK
-cd apps/fire-tv
-./gradlew assembleDebug
+pnpm dev:demo
 ```
 
-- **Backend:** local port `3001` by default. Check `http://localhost:3001/health`.
-- **Lens:** use the URL printed by Vite; for a phone, configure `VITE_SESSION_SERVICE_URL` to an address the phone can actually reach. **`localhost` on a phone is the phone, not your computer.** WSL, firewall, and HTTPS configuration may be required.
-- **Fire TV:** install the APK with `adb install -r apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk` **from the repository root**, or use the named-device deployment scripts described below. Configure the device's reachable backend address first.
-- **AI:** configure `GEMINI_API_KEY` in the backend environment and choose Gemini, or run the supported Ollama setup locally. Keep credentials out of source control. See the [AI and environment guide](dev-notes/development-environment.md).
-- **Database safety:** `pnpm dev:resume` preserves the designated local SQLite data. **`pnpm dev:fresh` deletes the designated local expedition database**; don't use it during an active playtest.
+The wizard can register named Fire TVs in the Git-ignored `scripts/fire-tv-devices.local.json`, select which TVs to deploy to, choose an AI provider, set a backend address reachable by the TVs, reuse healthy local services, build/install the APK on selected TVs, and optionally launch a **temporary Cloudflare Quick Tunnel**. When ready, it prints the HTTPS Lens URL: open that URL on each phone, create an expedition on a TV, and join with the TV's code. Phone camera access requires a secure origin (HTTPS).
 
-### Useful commands
+```bash
+pnpm fire-tv:demo  # Later: select TVs, build/install/launch; does not start Lens or Cloudflare
+```
+
+**How the URLs work:** the phone opens `https://<generated>.trycloudflare.com`; Lens uses `VITE_SESSION_SERVICE_URL=/` and Vite proxies `/sessions` to the local backend on port 3001. TVs use a separate backend address reachable from their network, such as `http://YOUR_LAN_IP:3001`. The TV address must reach **the same session service** as the Lens. WSL2 NAT may require Windows port forwarding/firewall configuration. The Cloudflare URL changes between runs; don't save an old tunnel URL as the Lens API base.
+
+**If the phone says “Failed to fetch”:** check that `apps/lens/.env.local` contains `VITE_SESSION_SERVICE_URL=/` and that no higher-priority `apps/lens/.env.development.local` overrides it with an expired tunnel URL. Restart Vite after correcting the configuration. You can verify the actual served value with:
+
+```bash
+curl -s http://127.0.0.1:5173/src/services/apiClient.ts \
+  | grep -o '"VITE_SESSION_SERVICE_URL": *"[^"]*"'
+# Expected: "VITE_SESSION_SERVICE_URL": "/"
+```
+
+For detailed setup, manual three-terminal development, troubleshooting, and security notes, see the [development environment guide](dev-notes/development-environment.md).
+
+### Manual contributor workflow
+
+For debugging individual services, you can still run `pnpm dev:resume` for the backend, `pnpm --filter lens dev --host 0.0.0.0` for Lens, and `./gradlew assembleDebug` under `apps/fire-tv` for the APK. Unlike `dev:demo`, this workflow requires you to configure network addresses and HTTPS yourself. `pnpm dev:resume` preserves local SQLite sessions; **`pnpm dev:fresh` deletes the designated local expedition database**.
 
 ```bash
 pnpm check                       # lint + typecheck + tests
-pnpm build                       # build workspace packages with build scripts
-pnpm fire-tv:dev                 # interactive named-device selector
-pnpm fire-tv:dev monitor         # deploy to configured 'monitor' Fire TV
-pnpm fire-tv:deploy:all          # install on connected authorized TVs
-pnpm fire-tv:launch:all          # launch on connected authorized TVs
+pnpm build                       # workspace build
+pnpm dev:demo                    # interactive local demo + optional HTTPS tunnel
+pnpm fire-tv:demo                # deploy selected TVs without launching services
+pnpm fire-tv:dev                 # legacy named-device selector
+pnpm fire-tv:deploy:all          # installs to ALL authorized ADB devices
+pnpm fire-tv:launch:all          # launches on ALL authorized ADB devices
 ```
-
-The Fire TV aliases live in the ignored local file `scripts/fire-tv-devices.local.json`. **Do not copy the original developer's device IPs or credentials into your configuration.** For exact script behavior, supported arguments, adding a TV, API request examples, and troubleshooting, use the component documentation below.
 
 ## Documentation and repository map
 

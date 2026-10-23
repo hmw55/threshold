@@ -5,7 +5,7 @@ if (!SESSION_SERVICE_URL) {
   throw new Error("VITE_SESSION_SERVICE_URL is not configured.");
 }
 
-const BASE_URL = SESSION_SERVICE_URL.replace(/\/+$/, "");
+const BASE_URL = SESSION_SERVICE_URL === "/" ? "" : SESSION_SERVICE_URL.replace(/\/+$/, "");
 
 export class SessionClientError extends Error {
   readonly statusCode: number;

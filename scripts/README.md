@@ -6,6 +6,8 @@ These scripts are run from the **repository root**. Read [development environmen
 
 | Command | What it does | Side effects |
 |---|---|---|
+| `pnpm dev:demo` | Interactive complete demo with optional HTTPS Lens tunnel and selected TVs | Starts/reuses services; changes ignored local configuration |
+| `pnpm fire-tv:demo` | Interactive deployment to selected TVs | Builds/installs/launches selected devices |
 | `pnpm dev:resume` | Start watched session backend using the local SQLite database | **Preserves** expeditions |
 | `pnpm dev:fresh` | Delete designated local SQLite database and start backend | **Destructive**: removes local expedition state |
 | `pnpm fire-tv:dev` | Interactive named Fire TV selection; build, install, restart app | Changes installed app on one TV |
@@ -17,6 +19,17 @@ These scripts are run from the **repository root**. Read [development environmen
 | `pnpm test` | Workspace tests | Tests may use temporary state |
 | `pnpm build` | Workspace builds | Writes build artifacts |
 | `pnpm check` | Lint, typecheck and test | Recommended before commits |
+
+## Interactive demo wizard (`demo-launcher.mjs`)
+
+```bash
+pnpm dev:demo       # backend + Lens + optional Cloudflare HTTPS + selected TVs
+pnpm fire-tv:demo   # selected Fire TV deployment only
+```
+
+`dev:demo` registers/updates device aliases in ignored `scripts/fire-tv-devices.local.json`, offers an AI provider choice, asks for the backend URL reachable by TVs, starts/reuses local services, optionally starts a temporary Cloudflare tunnel for phone camera access, and builds/installs/launches selected TVs. The final READY screen prints the **current** HTTPS Lens URL. `fire-tv:demo` only builds and deploys the selected TVs; it does not start Cloudflare or the backend.
+
+Lens demo configuration is `VITE_SESSION_SERVICE_URL=/`, using the Vite `/sessions` proxy to the local backend. The Fire TV uses a separately configured backend address and must reach the **same** session service. On WSL2, Windows port forwarding/firewall settings may be necessary. Avoid reusing expired Quick Tunnel URLs. If a phone gets `Failed to fetch`, check `apps/lens/.env.development.local` for a higher-priority stale override of `.env.local`, then restart Vite.
 
 ## `dev-session.mjs`
 
