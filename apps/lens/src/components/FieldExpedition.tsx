@@ -60,7 +60,7 @@ export function FieldExpedition({sessionCode,playerId,playerToken}:Props) {
   }
   async function inspect(e:Evidence){
     try{
-      const root=(import.meta.env.VITE_SESSION_SERVICE_URL as string).replace(/\/+$/,'');
+      const root=(import.meta.env.VITE_SESSION_SERVICE_URL as string)==='/'?'':(import.meta.env.VITE_SESSION_SERVICE_URL as string).replace(/\/+$/,'');
       const r=await fetch(`${root}${e.url}`,{headers});if(!r.ok)throw Error('Image unavailable or still private.');
       const blob=await r.blob();setOpenPhoto({id:e.id,url:URL.createObjectURL(blob)});
     }catch(e){setError(e instanceof Error?e.message:'Image unavailable.');}

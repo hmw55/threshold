@@ -52,7 +52,33 @@ SESSION_SERVICE_URL=http://192.168.1.50:3001
 
 Do **not** copy someone else's LAN IP. Fire TV's `localhost` refers to the **TV itself**, not your workstation. The `SESSION_SERVICE_URL` value is compiled into `BuildConfig`, so **rebuild and reinstall the APK after changing it**.
 
-## 3. Fastest local run: three terminals
+## 3. Recommended: interactive demo launcher
+
+The simplest physical-device demo is now:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev:demo
+```
+
+The wizard configures/chooses named TVs, offers offline/Ollama/Gemini AI selection, sets the TV-reachable backend URL, starts or reuses the local backend and Lens, optionally starts a Cloudflare Quick Tunnel for the phone's HTTPS camera context, and builds/installs/launches the APK on selected TVs. It prints a final **THRESHOLD // READY** summary with the current Lens URL. Keep the wizard running during the game; Ctrl+C stops processes it started, but reused services may remain running.
+
+```bash
+pnpm fire-tv:demo  # TV-only selection and deployment; no Lens/tunnel startup
+```
+
+The local Lens uses `VITE_SESSION_SERVICE_URL=/`: phone requests to `/sessions` stay on the HTTPS Lens origin and Vite proxies them to the backend on port 3001. TVs connect to that same backend through a **separate reachable LAN/backend URL**. WSL2 NAT can require Windows port forwarding or mirrored networking. A successful local `/health` response does not prove the TV can reach the backend.
+
+**Stale Vite configuration:** `.env.development.local` takes precedence over `.env.local` in Vite development mode. If an older file sets `VITE_SESSION_SERVICE_URL` to an expired Quick Tunnel, remove or update that conflicting entry, then restart Vite. To inspect what the browser is actually served:
+
+```bash
+curl -s http://127.0.0.1:5173/src/services/apiClient.ts \
+  | grep -o '"VITE_SESSION_SERVICE_URL": *"[^"]*"'
+```
+
+The expected demo value is `/`. A Cloudflare Quick Tunnel URL is temporary; do not commit or hardcode it into the Lens API configuration. A fully successful playthrough has been reported with the wizard, but other hardware and network combinations still need validation.
+
+## 4. Manual local run: three terminals
 
 ### Terminal A — start the session backend
 
@@ -102,10 +128,12 @@ adb -s 192.168.1.80:5555 shell am start -n com.thresholdtv/.MainActivity
 
 The debug APK lives at `apps/fire-tv/app/build/outputs/apk/debug/app-debug.apk`. **Start the backend first**, then the TV. Create an expedition on a TV, open the Lens on a phone, join using the code shown by the TV, and proceed through calibration. For two or more TVs, join the **same expedition code** rather than creating independent sessions.
 
-## 4. All repository-level scripts — exact behavior
+## 5. All repository-level scripts — exact behavior
 
 | Command | Actual behavior | Important caution |
 |---|---|---|
+| `pnpm dev:demo` | Interactive backend/Lens/HTTPS tunnel setup and selected-TV deployment | Preferred full demo; temporary tunnel URL |
+| `pnpm fire-tv:demo` | Interactive TV-only build/install/launch for selected devices | Does not start Lens or tunnel |
 | `pnpm dev:resume` | Runs `node scripts/dev-session.mjs resume`; starts local backend and preserves SQLite | Recommended for ongoing development |
 | `pnpm dev:fresh` | Runs `node scripts/dev-session.mjs fresh`; removes `.local/threshold/sessions.sqlite` and SQLite WAL/SHM | **Destructive**; stop active playtests first |
 | `pnpm fire-tv:dev` | Interactive selector of named TVs; builds, installs, force-stops, launches | Requires `jq`, `adb`, ignored device JSON |

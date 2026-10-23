@@ -1,4 +1,3 @@
-
 {
   "name": "threshold",
   "version": "0.1.0",
@@ -13,7 +12,9 @@
     "dev:fresh": "node scripts/dev-session.mjs fresh",
     "fire-tv:dev": "bash scripts/fire-tv-dev.sh",
     "fire-tv:deploy:all": "bash scripts/fire-tv-all.sh deploy",
-    "fire-tv:launch:all": "bash scripts/fire-tv-all.sh launch"
+    "fire-tv:launch:all": "bash scripts/fire-tv-all.sh launch",
+    "dev:demo": "node scripts/demo-launcher.mjs",
+    "fire-tv:demo": "node scripts/demo-launcher.mjs --tv-only"
   },
   "scriptsInfo": {
     "dev:resume": "Start the local session backend on port 3001 while preserving existing expeditions, players, and Fire TV assignments across restarts. Run before launching the Fire TV app. Does not use AWS.",

@@ -4,7 +4,20 @@ Lens is Threshold's React 19 / TypeScript / Vite web client. Players use a phone
 
 See [applications overview](../README.md), [session API](../../services/session/README.md), and [full development environment](../../dev-notes/development-environment.md).
 
-## First run
+## Recommended HTTPS phone demo
+
+From the repository root run `pnpm dev:demo` and choose the Cloudflare Quick Tunnel option. Open the generated HTTPS Lens URL on each phone. This provides a secure browser origin for camera capture without requiring the phone to connect directly to the backend's HTTP port.
+
+For this demo mode, `apps/lens/.env.local` should contain `VITE_SESSION_SERVICE_URL=/`. Vite proxies same-origin `/sessions` requests to the local session service on port 3001. Do **not** set this to the generated Cloudflare URL: that URL is the Lens origin, not a durable API configuration. A `Failed to fetch` error can result from an old `.env.development.local` setting, which overrides `.env.local` in Vite development mode. Remove the conflicting value and restart Vite. Verify the served setting:
+
+```bash
+curl -s http://127.0.0.1:5173/src/services/apiClient.ts \
+  | grep -o '"VITE_SESSION_SERVICE_URL": *"[^"]*"'
+```
+
+Expected value: `/`. The TV must separately reach the same backend through its configured LAN/backend URL. For TV-only redeployment use `pnpm fire-tv:demo`.
+
+## Manual first run
 
 Requirements: Node.js 22+, pnpm 10.18.0, a running session backend, and a phone/browser that can reach both services.
 
