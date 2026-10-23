@@ -20,19 +20,12 @@ Experiences are classified as **positive**, **mixed**, or **negative**. General 
 ## Experience Summary
 
 | ID | Experience | Classification |
-
 |---|---|---|
-
 | AF-001 | [Physical Fire TV Development Setup](#af-001--physical-fire-tv-development-setup) | Positive |
-
 | AF-002 | [Reusing a Fire TV Remote Across Multiple Devices](#af-002--reusing-a-fire-tv-remote-across-multiple-devices) | Mixed |
-
 | AF-003 | [Fire OS 6 Compatibility and Physical Device Testing](#af-003--fire-os-6-compatibility-and-physical-device-testing) | Positive |
-
 | AF-004 | [Bedrock Account Verification and Zero Inference Quotas](#af-004--bedrock-account-verification-and-zero-inference-quotas) | Negative |
-
 | AF-005 | [AWS Infrastructure Setup and Cross-Device Backend Deployment](#af-005--aws-infrastructure-setup-and-cross-device-backend-deployment) | Positive |
-
 | AF-006 | [CloudWatch Operational Logging and Failure Monitoring](#af-006--cloudwatch-operational-logging-and-failure-monitoring) | Positive |
 
 ---
