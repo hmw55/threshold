@@ -10,33 +10,19 @@
 
 Hackathon submission: Threshold is being submitted to the Fire TV primary track, with entries in the AWS Builder Mini Challenge and Open Source Mini Challenge.
 
-<!-- ===================================================================== -->
-<!-- MEDIA TODO 1 — HERO IMAGE (HIGHEST PRIORITY)                         -->
-<!-- Capture: a real Fire TV showing the Architect's transmission, with   -->
-<!-- a phone running Lens visibly in the foreground. Prefer a landscape  -->
-<!-- 16:9 composition, no private addresses, session tokens, or faces     -->
-<!-- unless you have permission. Save as docs/media/threshold-hero.png.   -->
-<!-- Remove this comment when the image is ready.                          -->
-<!-- ===================================================================== -->
 
-**📸 HERO SCREENSHOT NEEDED:** `docs/media/threshold-hero.png` — Fire TV + phone in the same shot, immediately showing the two-screen concept.
+![Threshold: The Last Witness — A Fire TV Threshold and mobile Lens bringing an AI-directed mystery into the real world](docs/media/threshold-hero.jpg)
 
-<!-- When ready, replace the line above with:
-![Threshold: a Fire TV terminal and a mobile Lens sharing an expedition](docs/media/threshold-hero.png)
--->
+
 
 ## Watch the demo
 
-<!-- ===================================================================== -->
-<!-- MEDIA TODO 2 — DEMO VIDEO                                            -->
-<!-- Upload your finished 2-minute demo/trailer to YouTube or another     -->
-<!-- public host. Add the real URL below and link to the Devpost project. -->
-<!-- A YouTube thumbnail can be clickable using:                          -->
-<!-- [![Watch Threshold demo](docs/media/demo-thumbnail.png)](VIDEO_URL) -->
-<!-- Do not invent a video link before it exists.                          -->
-<!-- ===================================================================== -->
+[![Watch Threshold: The Last Witness — Official Gameplay Trailer](docs/media/threshold-opening-glitch.gif)](https://www.youtube.com/watch?v=UOPRjbpR6G0)
 
-**🎬 VIDEO GOES HERE:** Add the **2-minute gameplay trailer** immediately under this heading. Show: session join → photographing a real object → public TV transmission + private Lens instruction → players moving/cooperating → the final choice. Store a representative still at `docs/media/demo-thumbnail.png` and replace this placeholder with a linked thumbnail or video link.
+**[▶ Watch Threshold: The Last Witness on YouTube](https://www.youtube.com/watch?v=UOPRjbpR6G0)**
+
+Experience an AI-directed mystery where Fire TVs become shared terminals, smartphones become private Lenses, and your real-world environment becomes part of the game.
+
 
 **Devpost submission:** _Add the published project link here after submission._
 
@@ -55,32 +41,64 @@ Hackathon submission: Threshold is being submitted to the Fire TV primary track,
 <!-- MEDIA TODO 3 — GAMEPLAY SCREENSHOT GALLERY                            -->
 <!-- Capture 4–6 genuine screenshots, ideally from the final demo build:  -->
 <!-- 1. docs/media/lens-calibration.png — object confirmation/photo flow  -->
-<!-- 2. docs/media/tv-architect.png — Architect transmission on Fire TV   -->
+
 <!-- 3. docs/media/lens-private-task.png — private instruction (no token) -->
-<!-- 4. docs/media/tv-signal.png — TV interaction / cooperative signal    -->
+
 <!-- 5. docs/media/lens-evidence.png — evidence or confrontation          -->
 <!-- 6. docs/media/lens-finale.png — final decision or polished results   -->
 <!-- Prefer real captures over mockups. Avoid exposing player identities, -->
 <!-- private house details, IPs, session codes, or credentials.            -->
 <!-- ===================================================================== -->
 
-| Screenshot to add | What it demonstrates |
-|---|---|
-| **📸 `docs/media/lens-calibration.png`** | A real object captured through Lens and presented for confirmation |
-| **📸 `docs/media/tv-architect.png`** | The Architect addressing the group through a Fire TV Threshold |
-| **📸 `docs/media/lens-private-task.png`** | A player's private instruction or clue |
-| **📸 `docs/media/tv-signal.png`** | A shared TV interaction, preferably the cooperative signal task |
-| **📸 `docs/media/lens-evidence.png`** | Evidence, an accusation, or an Architect contradiction |
-| **📸 `docs/media/lens-finale.png`** | The final decision/results interface |
 
-<!-- Once captured, replace the table above with a gallery, for example:
-| Calibration | The Architect | Private mission |
-|---|---|---|
-| ![Lens calibration](docs/media/lens-calibration.png) | ![TV transmission](docs/media/tv-architect.png) | ![Private Lens task](docs/media/lens-private-task.png) |
-| Cooperation | Evidence | Finale |
-|---|---|---|
-| ![TV cooperation](docs/media/tv-signal.png) | ![Lens evidence](docs/media/lens-evidence.png) | ![Lens finale](docs/media/lens-finale.png) |
--->
+## See the game
+
+### Fire TV expedition dashboard
+
+
+### AI-powered room discovery
+
+![Lens identifying and verifying real-world objects](docs/media/lens-room-discoveries.jpg)
+
+The Architect analyzes environmental photographs and identifies objects that players can verify before gameplay.
+
+### The Architect's transmission
+
+![The Architect introducing The Open Boundary](docs/media/tv-architect-transmission.jpg)
+
+An AI-directed mystery unfolds on Fire TV, transforming the physical environment into an investigation site.
+
+### Multiplayer across Fire TVs
+
+![Three operatives connected across two Fire TV Thresholds](docs/media/tv-multiplayer-lobby.jpg)
+
+Multiple Fire TV devices share an expedition while players join through their personal mobile Lenses.
+
+### Connect your Lens
+
+![Threshold Lens mobile expedition connection screen](docs/media/lens-expedition-connection.jpg)
+
+Players enter an expedition access code and establish their individual connection to the shared experience.
+
+### Investigate the real world
+
+![Lens environmental investigation and evidence submission](docs/media/lens-environmental-investigation.jpg)
+
+Players interact with their surroundings, document observations, and submit grounded evidence to advance the investigation.
+
+
+![Threshold Fire TV expedition dashboard showing operatives, witness records, the Architect feed, and system diagnostics](docs/media/tv-expedition-dashboard.jpg)
+
+The shared Threshold interface gives players access to expedition information, witness records, the Architect's transmissions, and system diagnostics. Each panel can be expanded for a closer look.
+
+This particular photo is of the final screen. All prior game play screens (after the story introduction) follow this layout.
+
+### The Architect interrupts
+
+![Red security interruption screen announcing that the Architect has interrupted the Fire TV channel](docs/media/tv-architect-interruption.jpg)
+
+The Architect can interrupt the shared display with dramatic transmissions, turning the Fire TV into an active part of the unfolding mystery.
+
 
 ## How *The Last Witness* plays
 
@@ -95,8 +113,6 @@ Hackathon submission: Threshold is being submitted to the Fire TV primary track,
 
 ### Gameplay flow
 
-<!-- This PNG is part of the documentation reorganization; verify it has -->
-<!-- been copied to docs/diagrams/ before publishing this README.         -->
 ![Threshold gameplay flow](docs/diagrams/Threshold-Gameplay-Flow(3).png)
 
 [Gameplay design and stage details](docs/game-design.md) · [Editable gameplay flow diagram](docs/diagrams/threshold-gameplay-flow.mmd)
@@ -117,8 +133,6 @@ The Lens and backend are **separate services**: a working backend URL does not a
 
 ### Architecture diagram
 
-<!-- Verify this PNG is present after moving docs/architecture/ to       -->
-<!-- docs/diagrams/. Do not leave a broken image in the public README.    -->
 ![Threshold AWS architecture](docs/diagrams/Threshold-AWS-Architecture(1).png)
 
 [Full system architecture](docs/architecture.md) · [Editable AWS diagram](docs/diagrams/threshold-aws-architecture.mmd) · [Session lifecycle](docs/session-lifecycle.md)
@@ -140,7 +154,8 @@ pnpm dev:demo
 The wizard can register named Fire TVs in the Git-ignored `scripts/fire-tv-devices.local.json`, select which TVs to deploy to, choose an AI provider, set a backend address reachable by the TVs, reuse healthy local services, build/install the APK on selected TVs, and optionally launch a **temporary Cloudflare Quick Tunnel**. When ready, it prints the HTTPS Lens URL: open that URL on each phone, create an expedition on a TV, and join with the TV's code. Phone camera access requires a secure origin (HTTPS).
 
 ```bash
-pnpm fire-tv:demo  # Later: select TVs, build/install/launch; does not start Lens or Cloudflare
+pnpm fire-tv:demo  
+# This script does not start a fresh instance after game play. Either wait for the times to run out to restart or kill other instances.
 ```
 
 **How the URLs work:** the phone opens `https://<generated>.trycloudflare.com`; Lens uses `VITE_SESSION_SERVICE_URL=/` and Vite proxies `/sessions` to the local backend on port 3001. TVs use a separate backend address reachable from their network, such as `http://YOUR_LAN_IP:3001`. The TV address must reach **the same session service** as the Lens. WSL2 NAT may require Windows port forwarding/firewall configuration. The Cloudflare URL changes between runs; don't save an old tunnel URL as the Lens API base.
